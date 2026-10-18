@@ -1,0 +1,72 @@
+diff --git a/codex-rs/utils/pty/src/pty.rs b/codex-rs/utils/pty/src/pty.rs
+--- a/codex-rs/utils/pty/src/pty.rs
++++ b/codex-rs/utils/pty/src/pty.rs
+@@ -1,4 +1,6 @@
+ use std::collections::HashMap;
++#[cfg(target_os = "ios")]
++use std::ffi::OsStr;
+ #[cfg(unix)]
+ use std::fs::File;
+ use std::io::ErrorKind;
+@@ -133,6 +135,22 @@ fn platform_native_pty_system() -> Box<dyn portable_pty::PtySystem + Send> {
+     }
+ }
+ 
++#[cfg(target_os = "ios")]
++fn should_fallback_pty_to_pipe(error: &anyhow::Error) -> bool {
++    let roothide_deb_forkless =
++        std::env::var_os("CODEXAPP_SPAWN_EXTERNAL").as_deref() == Some(OsStr::new("1"))
++            && std::env::var_os("CA_RUNTIME_ROOT_MODE").as_deref()
++                == Some(OsStr::new("roothide"))
++            && std::env::var_os("CA_RUNTIME_INSTALL_CHANNEL").as_deref()
++                == Some(OsStr::new("deb"));
++    if !roothide_deb_forkless {
++        return false;
++    }
++    let message = error.to_string().to_ascii_lowercase();
++    message.contains("pty")
++        && (message.contains("operation not permitted") || message.contains("permission denied"))
++}
++
+ /// Spawn a process attached to a PTY, preserving selected inherited file
+ /// descriptors across exec on Unix.
+ pub async fn spawn_process(
+@@ -171,9 +189,35 @@ pub async fn spawn_process(
+     }
+     #[cfg(unix)]
+     if !inherited_fds.as_slice().is_empty() {
+-        return spawn_process_preserving_fds(program, args, cwd, env, arg0, size, inherited_fds)
+-            .await;
++        let result =
++            spawn_process_preserving_fds(program, args, cwd, env, arg0, size, inherited_fds).await;
++        #[cfg(target_os = "ios")]
++        if let Err(error) = &result
++            && should_fallback_pty_to_pipe(error)
++        {
++            // RootHide/DEB on affected iOS 18 devices can reject openpty(3)
++            // before a child exists. Preserve the command and inherited FDs,
++            // but degrade only this launch to a regular pipe with writable
++            // stdin instead of failing the entire unified-exec request.
++            return crate::pipe::spawn_process(
++                program,
++                args,
++                cwd,
++                env,
++                arg0,
++                inherited_fds.as_slice(),
++            )
++            .await;
++        }
++        return result;
+     }
+ 
+-    spawn_process_portable(program, args, cwd, env, arg0, size).await
++    let result = spawn_process_portable(program, args, cwd, env, arg0, size).await;
++    #[cfg(target_os = "ios")]
++    if let Err(error) = &result
++        && should_fallback_pty_to_pipe(error)
++    {
++        return crate::pipe::spawn_process(program, args, cwd, env, arg0, &[]).await;
++    }
++    result
+ }
