@@ -1,0 +1,31 @@
+diff --git a/codex-rs/utils/pty/src/pipe.rs b/codex-rs/utils/pty/src/pipe.rs
+--- a/codex-rs/utils/pty/src/pipe.rs
++++ b/codex-rs/utils/pty/src/pipe.rs
+@@ -154,9 +154,26 @@ async fn spawn_process_with_stdin_mode(
+     if let Some(arg0) = arg0 {
+         command.arg0(arg0);
+     }
++    // RootHide DEB runs on the app's forkless process model. On affected
++    // iOS devices POSIX_SPAWN_SETSID is rejected with EPERM, while a new
++    // process group is sufficient for unified-exec cancellation/killpg.
++    // Keep every other iOS installation on the upstream NewSession mode.
++    #[cfg(target_os = "ios")]
++    let process_mode = if std::env::var_os("CODEXAPP_SPAWN_EXTERNAL").as_deref()
++        == Some(OsStr::new("1"))
++        && std::env::var_os("CA_RUNTIME_ROOT_MODE").as_deref() == Some(OsStr::new("roothide"))
++        && std::env::var_os("CA_RUNTIME_INSTALL_CHANNEL").as_deref()
++            == Some(OsStr::new("deb"))
++    {
++        ProcessMode::NewGroup
++    } else {
++        ProcessMode::NewSession
++    };
++    #[cfg(all(unix, not(target_os = "ios")))]
++    let process_mode = ProcessMode::NewSession;
+     #[cfg(unix)]
+     command
+-        .process_mode(ProcessMode::NewSession)
++        .process_mode(process_mode)
+         .descriptor_policy(DescriptorPolicy::Explicit)
+         .inherit_fds(inherited_fds);
+     #[cfg(target_os = "linux")]
