@@ -1,0 +1,24 @@
+diff --git a/codex-rs/utils/pty/src/posix_child.rs b/codex-rs/utils/pty/src/posix_child.rs
+--- a/codex-rs/utils/pty/src/posix_child.rs
++++ b/codex-rs/utils/pty/src/posix_child.rs
+@@ -344,9 +344,16 @@ impl NativeChild {
+                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                 Err(error) => return Err(error),
+             }
+-            self.sigchld
+-                .recv()
+-                .await
+-                .ok_or_else(|| io::Error::other("SIGCHLD stream closed"))?;
++            // TrollStore's forkless launch may not deliver SIGCHLD through
++            // Tokio's signal stream. Poll waitpid periodically on iOS rather
++            // than leaving an already exited command permanently "running".
++            // This does not signal or interfere with the child process.
++            #[cfg(target_os = "ios")]
++            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
++            #[cfg(not(target_os = "ios"))]
++            self.sigchld
++                .recv()
++                .await
++                .ok_or_else(|| io::Error::other("SIGCHLD stream closed"))?;
+         }
+     }
