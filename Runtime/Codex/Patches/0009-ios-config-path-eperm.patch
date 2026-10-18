@@ -1,0 +1,43 @@
+diff --git a/codex-rs/config/src/loader/layer_io.rs b/codex-rs/config/src/loader/layer_io.rs
+--- a/codex-rs/config/src/loader/layer_io.rs
++++ b/codex-rs/config/src/loader/layer_io.rs
+@@ -220,7 +220,21 @@
+ ///
+ /// On Windows, the default path is only checked so callers can warn that it is ignored.
+ pub(super) fn managed_config_default_path(codex_home: &Path) -> PathBuf {
+-    #[cfg(unix)]
++    #[cfg(target_os = "ios")]
++    {
++        let _ = codex_home;
++        if let Ok(executable) = std::env::current_exe()
++            && let Some(directory) = executable.parent()
++        {
++            let path = directory.join(".jbroot/etc/codex/managed_config.toml");
++            if path.is_file() {
++                return path;
++            }
++        }
++        return PathBuf::from("/var/jb/etc/codex/managed_config.toml");
++    }
++
++    #[cfg(all(unix, not(target_os = "ios")))]
+     {
+         let _ = codex_home;
+         PathBuf::from(CODEX_MANAGED_CONFIG_SYSTEM_PATH)
+diff --git a/codex-rs/config/src/loader/mod.rs b/codex-rs/config/src/loader/mod.rs
+--- a/codex-rs/config/src/loader/mod.rs
++++ b/codex-rs/config/src/loader/mod.rs
+@@ -797,7 +797,12 @@
+         if rootless_path.is_file() {
+             return AbsolutePathBuf::from_absolute_path(rootless_path);
+         }
+-    }
++
++        // Do not probe the real /etc from an iOS app process. RootHide/DEB on
++        // iOS 18 can return EPERM for that lookup instead of a harmless ENOENT.
++        return AbsolutePathBuf::from_absolute_path(rootless_path);
++    }
++    #[cfg(not(target_os = "ios"))]
+     AbsolutePathBuf::from_absolute_path(Path::new(SYSTEM_CONFIG_TOML_FILE_UNIX))
+ }
+ 
