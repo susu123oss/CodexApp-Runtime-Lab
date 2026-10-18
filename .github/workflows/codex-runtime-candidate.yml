@@ -15,6 +15,7 @@ on:
       - ".github/workflows/codex-runtime-candidate.yml"
       - "Runtime/Codex/Patches/**"
       - "Runtime/Recipes/codex.json"
+      - "ThirdParty/bash/codex-posix-spawn.patch"
       - "scripts/codex-candidate-plan.py"
       - "scripts/codex-patchset.py"
       - "scripts/publish-codex-runtime.py"
