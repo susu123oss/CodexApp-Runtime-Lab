@@ -1,0 +1,10 @@
+{
+  "schema": 3,
+  "source_name": "CodexApp Laboratory",
+  "source_format": 1,
+  "download_proxy_prefixes": [
+    "https://gh-proxy.org/",
+    "https://ghproxy.net/"
+  ],
+  "runtimes": {}
+}
