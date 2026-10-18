@@ -1,0 +1,23 @@
+{
+  "id": "codex",
+  "display_name": "Codex",
+  "group": "core",
+  "handler": "codex",
+  "order": 10,
+  "optional": false,
+  "summary": "Codex CLI 与 Code Mode Host。",
+  "ui": {
+    "symbol": "terminal.fill",
+    "tint": "blue"
+  },
+  "source": {
+    "repository": "https://github.com/openai/codex.git",
+    "version": "0.162.1",
+    "commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+    "patch_manifest": "Runtime/Codex/Patches/manifest.json"
+  },
+  "build": {
+    "prepare": "scripts/publish-codex-runtime.py",
+    "patch_verify": "python3 scripts/codex-patchset.py verify"
+  }
+}
