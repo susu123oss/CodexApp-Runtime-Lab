@@ -1,0 +1,29 @@
+diff --git a/codex-rs/config/src/loader/mod.rs b/codex-rs/config/src/loader/mod.rs
+--- a/codex-rs/config/src/loader/mod.rs
++++ b/codex-rs/config/src/loader/mod.rs
+@@ -799,6 +799,25 @@ fn has_local_managed_configuration_with_system_requirements_path(
+ 
+ #[cfg(unix)]
+ pub fn system_config_toml_file() -> io::Result<AbsolutePathBuf> {
++    // iOS jailbreaks: Codex is not libvroot-linked, so the real `/etc` is not
++    // the bootstrap's `/etc`. RootHide gives every Mach-O directory a
++    // `.jbroot` link; rootless uses the fixed `/var/jb` prefix.
++    #[cfg(target_os = "ios")]
++    {
++        if let Ok(executable) = std::env::current_exe()
++            && let Some(directory) = executable.parent()
++        {
++            let path = directory.join(".jbroot/etc/codex/config.toml");
++            if path.is_file() {
++                return AbsolutePathBuf::from_absolute_path(path);
++            }
++        }
++
++        let rootless_path = Path::new("/var/jb/etc/codex/config.toml");
++        if rootless_path.is_file() {
++            return AbsolutePathBuf::from_absolute_path(rootless_path);
++        }
++    }
+     AbsolutePathBuf::from_absolute_path(Path::new(SYSTEM_CONFIG_TOML_FILE_UNIX))
+ }
+ 
