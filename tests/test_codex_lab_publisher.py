@@ -49,14 +49,15 @@ class LabPublisherTests(unittest.TestCase):
             lab.verify_candidate(self.deb, self.sums, self.candidate)
 
     def test_lab_only_manifest_and_no_overwrite(self) -> None:
-        manifest = lab.prepare_manifest(lab.base_manifest(), "0.163.0-0", self.deb, self.digest)
+        manifest = lab.prepare_manifest(lab.base_manifest(), "0.163.0-0", self.deb, self.digest, self.candidate)
         entry = manifest["runtimes"]["codex"]
         self.assertEqual(entry["version"], "v0.163.0-0")
         self.assertIn("/CodexApp-Runtime-Lab/releases/download/", entry["archive_url"])
         self.assertNotIn("/CodexApp-Runtime/releases/", entry["archive_url"])
         self.assertEqual(entry["archive_sha256"], self.digest)
+        self.assertEqual(entry["candidate_tag"], self.candidate)
         with self.assertRaises(ValueError):
-            lab.prepare_manifest(manifest, "0.163.0-0", self.deb, self.digest)
+            lab.prepare_manifest(manifest, "0.163.0-0", self.deb, self.digest, self.candidate)
 
 
 if __name__ == "__main__":
