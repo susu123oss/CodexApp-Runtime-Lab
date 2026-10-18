@@ -1,0 +1,320 @@
+name: Codex Laboratory Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "即使当前 candidate 已发布，也强制重新构建并递增 Lab revision"
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/codex-runtime-candidate.yml"
+      - "Runtime/Codex/Patches/**"
+      - "Runtime/Recipes/codex.json"
+      - "scripts/codex-candidate-plan.py"
+      - "scripts/codex-patchset.py"
+      - "scripts/publish-codex-runtime.py"
+      - "scripts/publish-codex-lab.py"
+  schedule:
+    - cron: "20 0 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codex-runtime-laboratory
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Resolve laboratory candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      upstream_tag: ${{ steps.plan.outputs.upstream_tag }}
+      upstream_sha: ${{ steps.plan.outputs.upstream_sha }}
+      patch_digest: ${{ steps.plan.outputs.patch_digest }}
+      candidate_tag: ${{ steps.plan.outputs.candidate_tag }}
+      runtime_version: ${{ steps.lab.outputs.runtime_version }}
+      should_build: ${{ steps.lab.outputs.should_build }}
+
+    steps:
+      - name: Check out Laboratory repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify canonical patchset
+        run: python3 scripts/codex-patchset.py verify
+
+      - name: Resolve latest OpenAI stable release
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/codex-candidate-plan.py --github-output "$GITHUB_OUTPUT"
+
+      - name: Resolve immutable Laboratory revision
+        id: lab
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          CANDIDATE_TAG: ${{ steps.plan.outputs.candidate_tag }}
+          FORCE_REQUESTED: ${{ github.event.inputs.force || 'false' }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          candidate = os.environ["CANDIDATE_TAG"]
+          force = os.environ.get("FORCE_REQUESTED", "false").lower() == "true"
+          manifest = json.loads(Path("Runtime/runtime-manifest.json").read_text())
+          entry = (manifest.get("runtimes") or {}).get("codex") or {}
+          current = str(entry.get("version") or "")
+          current_candidate = str(entry.get("candidate_tag") or "")
+
+          def semver3(value):
+              m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", value)
+              if not m:
+                  raise SystemExit(f"invalid upstream version: {value}")
+              return tuple(map(int, m.groups()))
+
+          revision = 0
+          should_build = True
+          if current_candidate == candidate and not force:
+              should_build = False
+              runtime_version = current.removeprefix("v") or f"{version}-0"
+          else:
+              if current:
+                  m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)-(\d+)", current)
+                  if not m:
+                      raise SystemExit(f"invalid current Lab version: {current}")
+                  current_base = ".".join(m.groups()[:3])
+                  if semver3(current_base) > semver3(version) and not force:
+                      should_build = False
+                      runtime_version = current.removeprefix("v")
+                  elif current_base == version:
+                      revision = int(m.group(4)) + 1
+                      runtime_version = f"{version}-{revision}"
+                  else:
+                      runtime_version = f"{version}-0"
+              else:
+                  runtime_version = f"{version}-0"
+
+              if should_build:
+                  while subprocess.run(
+                      ["gh", "release", "view", f"runtime-codex-v{runtime_version}"],
+                      stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL,
+                  ).returncode == 0:
+                      revision += 1
+                      runtime_version = f"{version}-{revision}"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"runtime_version={runtime_version}\n")
+              out.write(f"should_build={str(should_build).lower()}\n")
+
+          print(f"candidate={candidate}")
+          print(f"current={current or '<empty>'}")
+          print(f"runtime_version={runtime_version}")
+          print(f"should_build={should_build}")
+          PY
+
+      - name: Planning summary
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          SHA: ${{ steps.plan.outputs.upstream_sha }}
+          CANDIDATE_TAG: ${{ steps.plan.outputs.candidate_tag }}
+          RUNTIME_VERSION: ${{ steps.lab.outputs.runtime_version }}
+          SHOULD_BUILD: ${{ steps.lab.outputs.should_build }}
+        run: |
+          {
+            echo "### Codex Laboratory plan"
+            echo
+            echo "- OpenAI stable: \`rust-v${VERSION}\`"
+            echo "- commit: \`${SHA}\`"
+            echo "- candidate identity: \`${CANDIDATE_TAG}\`"
+            echo "- Lab runtime: \`v${RUNTIME_VERSION}\`"
+            echo "- build: \`${SHOULD_BUILD}\`"
+            echo "- Stable repository: **not involved**"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build and publish Laboratory Runtime
+    needs: plan
+    if: needs.plan.outputs.should_build == 'true'
+    runs-on: macos-26
+    timeout-minutes: 360
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      UPSTREAM_TAG: ${{ needs.plan.outputs.upstream_tag }}
+      UPSTREAM_SHA: ${{ needs.plan.outputs.upstream_sha }}
+      PATCH_DIGEST: ${{ needs.plan.outputs.patch_digest }}
+      CANDIDATE_TAG: ${{ needs.plan.outputs.candidate_tag }}
+      RUNTIME_VERSION: ${{ needs.plan.outputs.runtime_version }}
+      PACKAGING_ROOT: ${{ github.workspace }}/.candidate/packaging
+      AUDIT_SOURCE: ${{ github.workspace }}/.candidate/openai-codex
+      CANDIDATE_ROOT: ${{ github.workspace }}/.candidate
+
+    steps:
+      - name: Check out Laboratory repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select newest Xcode
+        id: xcode
+        run: |
+          set -euo pipefail
+          latest="$(find /Applications -maxdepth 1 -type d -name 'Xcode*.app' -print | sort -V | tail -n1)"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          fingerprint="$(xcodebuild -version | shasum -a 256 | cut -c1-16)"
+          echo "fingerprint=$fingerprint" >>"$GITHUB_OUTPUT"
+
+      - name: Install host packaging tools
+        run: brew install ldid zstd
+
+      - name: Audit canonical patches against clean OpenAI source
+        run: |
+          set -euo pipefail
+          mkdir -p "$CANDIDATE_ROOT"
+          git clone --filter=blob:none --no-checkout https://github.com/openai/codex.git "$AUDIT_SOURCE"
+          git -C "$AUDIT_SOURCE" checkout --detach "$UPSTREAM_SHA"
+          test "$(git -C "$AUDIT_SOURCE" rev-parse HEAD)" = "$UPSTREAM_SHA"
+          python3 scripts/codex-patchset.py status --source "$AUDIT_SOURCE" | tee "$CANDIDATE_ROOT/candidate-audit.txt"
+          test -z "$(git -C "$AUDIT_SOURCE" status --porcelain)"
+
+      - name: Prepare iOS packaging toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/owngoal-dev/codex.git "$PACKAGING_ROOT"
+          rm -f "$PACKAGING_ROOT"/patches/*.patch
+          cp Runtime/Codex/Patches/*.patch "$PACKAGING_ROOT/patches/"
+          "$PACKAGING_ROOT/scripts/follow-upstream.sh"
+          test "$(tr -d '[:space:]' <"$PACKAGING_ROOT/configuration/version.txt")" = "$VERSION"
+          test "$(make -C "$PACKAGING_ROOT" --no-print-directory print-upstream)" = "$UPSTREAM_SHA"
+          make -C "$PACKAGING_ROOT" --no-print-directory source
+
+      - name: Read resolved build pins
+        id: pins
+        run: |
+          set -euo pipefail
+          source "$PACKAGING_ROOT/configuration/upstream.env"
+          echo "rust_toolchain=$RUST_TOOLCHAIN" >>"$GITHUB_OUTPUT"
+          echo "rusty_v8_ref=$RUSTY_V8_REF" >>"$GITHUB_OUTPUT"
+          echo "min_ios=$MIN_IOS" >>"$GITHUB_OUTPUT"
+
+      - name: Restore Rust/V8 build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.candidate/packaging/build/ios-arm64/cargo-home
+            ${{ github.workspace }}/.candidate/packaging/build/ios-arm64/target
+            ${{ github.workspace }}/.candidate/packaging/build/ios-arm64/rusty-v8
+          key: codex-ios-${{ runner.os }}-${{ steps.pins.outputs.rust_toolchain }}-${{ steps.pins.outputs.rusty_v8_ref }}-${{ needs.plan.outputs.patch_digest }}-${{ steps.xcode.outputs.fingerprint }}
+          restore-keys: |
+            codex-ios-${{ runner.os }}-${{ steps.pins.outputs.rust_toolchain }}-${{ steps.pins.outputs.rusty_v8_ref }}-
+            codex-ios-${{ runner.os }}-${{ steps.pins.outputs.rust_toolchain }}-
+            codex-ios-${{ runner.os }}-
+
+      - name: Validate reusable iOS packaging toolchain
+        run: |
+          set -euo pipefail
+          for script in "$PACKAGING_ROOT"/scripts/*.sh; do
+            bash -n "$script"
+          done
+          test -f "$PACKAGING_ROOT/configuration/upstream.env"
+          test -f "$PACKAGING_ROOT/configuration/version.txt"
+          test -f "$PACKAGING_ROOT/packaging/DEBIAN/control"
+          test -f "$PACKAGING_ROOT/packaging/codex.entitlements"
+          test -f "$PACKAGING_ROOT/packaging/codex.launcher.c"
+          test -f "$PACKAGING_ROOT/packaging/etc/codex/config.toml"
+          test -f "$PACKAGING_ROOT/scripts/check-skill-policy.sh"
+          plutil -lint "$PACKAGING_ROOT/packaging/codex.entitlements"
+          "$PACKAGING_ROOT/scripts/release-notes.sh" "v${VERSION}" >/dev/null
+          "$PACKAGING_ROOT/scripts/check-skill-policy.sh" --self-test --config "$PACKAGING_ROOT/packaging/etc/codex/config.toml"
+          patch_count="$(find "$PACKAGING_ROOT/patches" -maxdepth 1 -type f -name '*.patch' | wc -l | tr -d '[:space:]')"
+          test "$patch_count" = "10"
+          python3 scripts/codex-patchset.py verify
+
+      - name: Build Codex CLI and Code Mode Host for iOS
+        run: make -C "$PACKAGING_ROOT" --no-print-directory build
+
+      - name: Package CodexApp Laboratory Runtime
+        run: |
+          set -euo pipefail
+          payload="$PACKAGING_ROOT/build/ios-arm64/payload"
+          test -s "$payload/codex"
+          test -s "$payload/codex-code-mode-host"
+          python3 scripts/publish-codex-runtime.py \
+            --version "$RUNTIME_VERSION" \
+            --binary "$payload/codex" \
+            --host "$payload/codex-code-mode-host" \
+            --packaging-root "$PACKAGING_ROOT" \
+            --output-root "$CANDIDATE_ROOT/runtime"
+
+      - name: Build Laboratory notes
+        run: |
+          set -euo pipefail
+          output="$CANDIDATE_ROOT/runtime/$RUNTIME_VERSION"
+          deb="$output/wiki.qaq.codex_${RUNTIME_VERSION}_iphoneos-arm64.deb"
+          test -s "$deb"
+          test -s "$output/SHA256SUMS"
+          {
+            echo "# Codex Laboratory v${RUNTIME_VERSION}"
+            echo
+            echo "- OpenAI tag: \`$UPSTREAM_TAG\`"
+            echo "- OpenAI commit: \`$UPSTREAM_SHA\`"
+            echo "- candidate identity: \`$CANDIDATE_TAG\`"
+            echo "- patch digest: \`$PATCH_DIGEST\`"
+            echo "- iOS floor: \`${{ steps.pins.outputs.min_ios }}\`"
+            echo
+            echo "Experimental channel only. Stable CodexApp-Runtime is not modified."
+          } >"$CANDIDATE_ROOT/release-notes.md"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-laboratory-v${{ needs.plan.outputs.runtime_version }}
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            ${{ github.workspace }}/.candidate/runtime/${{ needs.plan.outputs.runtime_version }}/wiki.qaq.codex_${{ needs.plan.outputs.runtime_version }}_iphoneos-arm64.deb
+            ${{ github.workspace }}/.candidate/runtime/${{ needs.plan.outputs.runtime_version }}/SHA256SUMS
+            ${{ github.workspace }}/.candidate/candidate-audit.txt
+            ${{ github.workspace }}/.candidate/release-notes.md
+
+      - name: Publish Laboratory prerelease and catalog
+        env:
+          CODEX_LAB_RELEASE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          output="$CANDIDATE_ROOT/runtime/$RUNTIME_VERSION"
+          python3 scripts/publish-codex-lab.py \
+            --candidate-tag "$CANDIDATE_TAG" \
+            --deb "$output/wiki.qaq.codex_${RUNTIME_VERSION}_iphoneos-arm64.deb" \
+            --sums "$output/SHA256SUMS"
+
+      - name: Publication summary
+        run: |
+          {
+            echo "### Laboratory Runtime published"
+            echo
+            echo "- release: \`runtime-codex-v${RUNTIME_VERSION}\`"
+            echo "- candidate: \`$CANDIDATE_TAG\`"
+            echo "- Lab catalog updated: **YES**"
+            echo "- Stable catalog modified: **NO**"
+            echo "- automatic customer install: **NO**"
+          } >>"$GITHUB_STEP_SUMMARY"
