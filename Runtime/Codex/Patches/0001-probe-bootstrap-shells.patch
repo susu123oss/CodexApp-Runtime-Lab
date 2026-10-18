@@ -1,0 +1,98 @@
+diff --git a/codex-rs/shell-command/src/shell_detect.rs b/codex-rs/shell-command/src/shell_detect.rs
+--- a/codex-rs/shell-command/src/shell_detect.rs
++++ b/codex-rs/shell-command/src/shell_detect.rs
+@@ -189,6 +189,19 @@ fn get_elevated_sandbox_compatible_powershell_path(
+     None
+ }
+ 
++#[cfg(target_os = "ios")]
++fn roothide_shell(binary_name: &str) -> Option<PathBuf> {
++    let executable_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
++    ["bin", "usr/bin"].into_iter().find_map(|directory| {
++        file_exists(
++            &executable_dir
++                .join(".jbroot")
++                .join(directory)
++                .join(binary_name),
++        )
++    })
++}
++
+ fn get_shell_path(
+     shell_type: ShellType,
+     binary_name: &str,
+@@ -206,6 +219,11 @@ fn get_shell_path(
+         return Some(path);
+     }
+ 
++    #[cfg(target_os = "ios")]
++    if let Some(path) = roothide_shell(binary_name) {
++        return Some(path);
++    }
++
+     for path in fallback_paths {
+         if let Some(path) = file_exists(std::path::Path::new(path)) {
+             return Some(path);
+@@ -215,7 +233,12 @@ fn get_shell_path(
+     None
+ }
+ 
+-const ZSH_FALLBACK_PATHS: &[&str] = &["/bin/zsh"];
++const ZSH_FALLBACK_PATHS: &[&str] = &[
++    "/var/jb/bin/zsh",
++    "/var/jb/usr/bin/zsh",
++    "/bin/zsh",
++    "/usr/bin/zsh",
++];
+ 
+ fn get_zsh_shell() -> Option<DetectedShell> {
+     let shell_path = get_shell_path(ShellType::Zsh, "zsh", ZSH_FALLBACK_PATHS);
+@@ -226,7 +249,12 @@ fn get_zsh_shell() -> Option<DetectedShell> {
+     })
+ }
+ 
+-const BASH_FALLBACK_PATHS: &[&str] = &["/bin/bash", "/usr/bin/bash"];
++const BASH_FALLBACK_PATHS: &[&str] = &[
++    "/var/jb/bin/bash",
++    "/var/jb/usr/bin/bash",
++    "/bin/bash",
++    "/usr/bin/bash",
++];
+ 
+ fn get_bash_shell() -> Option<DetectedShell> {
+     let shell_path = get_shell_path(ShellType::Bash, "bash", BASH_FALLBACK_PATHS);
+@@ -237,7 +265,12 @@ fn get_bash_shell() -> Option<DetectedShell> {
+     })
+ }
+ 
+-const SH_FALLBACK_PATHS: &[&str] = &["/bin/sh"];
++const SH_FALLBACK_PATHS: &[&str] = &[
++    "/var/jb/bin/sh",
++    "/var/jb/usr/bin/sh",
++    "/bin/sh",
++    "/usr/bin/sh",
++];
+ 
+ fn get_sh_shell() -> Option<DetectedShell> {
+     let shell_path = get_shell_path(ShellType::Sh, "sh", SH_FALLBACK_PATHS);
+@@ -321,7 +354,10 @@ pub fn ultimate_fallback_shell() -> DetectedShell {
+     } else {
+         DetectedShell {
+             shell_type: ShellType::Sh,
+-            shell_path: PathBuf::from("/bin/sh"),
++            shell_path: SH_FALLBACK_PATHS
++                .iter()
++                .find_map(|path| file_exists(std::path::Path::new(path)))
++                .unwrap_or_else(|| PathBuf::from("/bin/sh")),
+         }
+     }
+ }
+@@ -355,7 +391,7 @@ pub fn default_user_shell_from_path(user_shell_path: Option<PathBuf>) -> Detecte
+             .and_then(|shell| detect_shell_type(&shell))
+             .and_then(get_shell);
+ 
+-        let shell_with_fallback = if cfg!(target_os = "macos") {
++        let shell_with_fallback = if cfg!(any(target_os = "macos", target_os = "ios")) {
+             user_default_shell
+                 .or_else(|| get_shell(ShellType::Zsh))
+                 .or_else(|| get_shell(ShellType::Bash))
