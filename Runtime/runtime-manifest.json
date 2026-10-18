@@ -6,5 +6,22 @@
     "https://gh-proxy.org/",
     "https://ghproxy.net/"
   ],
-  "runtimes": {}
+  "runtimes": {
+    "codex": {
+      "archive_sha256": "b1ef47cb6e1f0a378409f123f7bb3422b6dcaf3e69164d70709d146ad7f12155",
+      "archive_url": "https://github.com/susu123oss/CodexApp-Runtime-Lab/releases/download/runtime-codex-v0.162.1-4/wiki.qaq.codex_0.162.1-4_iphoneos-arm64.deb",
+      "asset_name": "wiki.qaq.codex_0.162.1-4_iphoneos-arm64.deb",
+      "display_name": "Codex · 实验室版",
+      "download_size": 99665764,
+      "group": "core",
+      "handler": "codex",
+      "minimum_ios": "15.0",
+      "optional": false,
+      "order": 10,
+      "release_tag": "runtime-codex-v0.162.1-4",
+      "runtime_format": 1,
+      "summary": "实验室 Codex CLI 与 Code Mode Host；需用户手动选择通道并确认安装。",
+      "version": "v0.162.1-4"
+    }
+  }
 }
