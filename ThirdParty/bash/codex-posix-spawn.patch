@@ -1,0 +1,380 @@
+--- a/execute_cmd.c
++++ b/execute_cmd.c
+@@ -52,6 +52,10 @@
+ #endif
+ 
+ #include <errno.h>
++
++#if defined (__APPLE__)
++#  include <spawn.h>
++#endif
+ 
+ #if !defined (errno)
+ extern int errno;
+@@ -121,6 +125,188 @@
+ /* Static functions defined and used in this file. */
+ static void close_pipes (int, int);
+ static void do_piping (int, int);
++
++#if defined (__APPLE__)
++static int
++codex_spawn_external_enabled (void)
++{
++  const char *value;
++  value = getenv ("CODEXAPP_SPAWN_EXTERNAL");
++  return value && value[0] == '1' && value[1] == '\0';
++}
++
++/* CODEXAPP_SPAWN_BRIDGE_V7: the CodexApp broker elevates this Bash process
++   once. Descendants inherit euid=0, so do not re-apply a root persona on each
++   posix_spawn. Repeated persona setup from an already-root shell is unstable
++   on iOS 16 when a pipeline has multiple live children. */
++static int
++codex_spawn_external_command (char *command, char **args, char **env,
++                              int pipe_in, int pipe_out,
++                              struct fd_bitmap *fds_to_close,
++                              int async, char *command_line)
++{
++  posix_spawnattr_t attr;
++  posix_spawn_file_actions_t actions;
++  sigset_t set, oset, child_mask;
++  short spawn_flags;
++  pid_t pid, current_pgrp;
++  int i, r, started_children;
++
++  if (codex_spawn_external_enabled () == 0 || command == 0 || args == 0)
++    return ENOTSUP;
++  if (interactive_shell && job_control)
++    return ENOTSUP;
++
++  sigemptyset (&set);
++  sigaddset (&set, SIGCHLD);
++  sigaddset (&set, SIGINT);
++  sigaddset (&set, SIGTERM);
++  sigprocmask (SIG_BLOCK, &set, &oset);
++  started_children = already_making_children == 0;
++  making_children ();
++
++  posix_spawnattr_init (&attr);
++  posix_spawn_file_actions_init (&actions);
++  spawn_flags = POSIX_SPAWN_SETSIGMASK;
++  child_mask = oset;
++  sigdelset (&child_mask, SIGCHLD);
++  sigdelset (&child_mask, SIGINT);
++  sigdelset (&child_mask, SIGTERM);
++  posix_spawnattr_setsigmask (&attr, &child_mask);
++  if (job_control)
++    {
++      posix_spawnattr_setpgroup (&attr, pipeline_pgrp ? pipeline_pgrp : 0);
++      spawn_flags |= POSIX_SPAWN_SETPGROUP;
++    }
++  else
++    {
++      current_pgrp = getpgrp ();
++      if (current_pgrp > 0)
++        {
++          posix_spawnattr_setpgroup (&attr, current_pgrp);
++          spawn_flags |= POSIX_SPAWN_SETPGROUP;
++        }
++    }
++  posix_spawnattr_setflags (&attr, spawn_flags);
++
++  if (pipe_in != NO_PIPE)
++    {
++      posix_spawn_file_actions_adddup2 (&actions, pipe_in, 0);
++      if (pipe_in > 0)
++        posix_spawn_file_actions_addclose (&actions, pipe_in);
++    }
++  if (pipe_out != NO_PIPE)
++    {
++      if (pipe_out != REDIRECT_BOTH)
++        {
++          posix_spawn_file_actions_adddup2 (&actions, pipe_out, 1);
++          if (pipe_out == 0 || pipe_out > 1)
++            posix_spawn_file_actions_addclose (&actions, pipe_out);
++        }
++      else
++        posix_spawn_file_actions_adddup2 (&actions, 1, 2);
++    }
++  if (fds_to_close)
++    for (i = 0; i < fds_to_close->size; i++)
++      if (fds_to_close->bitmap[i] && i != pipe_in && i != pipe_out)
++        posix_spawn_file_actions_addclose (&actions, i);
++
++  r = posix_spawn (&pid, command, &actions, &attr, args, env);
++  posix_spawn_file_actions_destroy (&actions);
++  posix_spawnattr_destroy (&attr);
++
++  if (r == 0)
++    {
++      register_spawned_child (savestring (command_line ? command_line : command),
++                              pid, async ? FORK_ASYNC : FORK_SYNC);
++    }
++  else if (started_children)
++    stop_making_children ();
++
++  sigprocmask (SIG_SETMASK, &oset, (sigset_t *)NULL);
++  return r;
++}
++
++/* CODEXAPP_SPAWN_REDIRECT_PIPE_V7: for a redirected foreground pipeline
++   stage, Bash's normal child order is:
++
++     1. connect pipe stdin/stdout
++     2. apply the command's explicit redirections
++     3. exec
++
++   Pure TrollStore cannot rely on the fork() path that normally provides that
++   child context. Temporarily reproduce steps 1 and 2 in the parent, spawn the
++   child inheriting the resulting stdio, then restore the parent immediately.
++   Raw pipe descriptors remain open in the parent; the spawned child closes its
++   copies through fds_to_close. */
++static int
++codex_save_parent_fd (int fd)
++{
++  int saved;
++
++  saved = fcntl (fd, F_DUPFD_CLOEXEC, 10);
++  if (saved >= 0)
++    return saved;
++  if (errno == EBADF)
++    return -2;  /* Original descriptor was closed. */
++  return -3;
++}
++
++static void
++codex_restore_parent_fd (int fd, int saved)
++{
++  if (saved >= 0)
++    {
++      dup2 (saved, fd);
++      close (saved);
++    }
++  else if (saved == -2)
++    close (fd);
++}
++
++static int
++codex_apply_pipeline_parent (int pipe_in, int pipe_out,
++                             int *saved_stdin, int *saved_stdout,
++                             int *saved_stderr)
++{
++  *saved_stdin = *saved_stdout = *saved_stderr = -1;
++
++  if (pipe_in != NO_PIPE)
++    {
++      *saved_stdin = codex_save_parent_fd (0);
++      if (*saved_stdin == -3 || dup2 (pipe_in, 0) < 0)
++        return -1;
++    }
++  if (pipe_out != NO_PIPE)
++    {
++      if (pipe_out != REDIRECT_BOTH)
++        {
++          *saved_stdout = codex_save_parent_fd (1);
++          if (*saved_stdout == -3 || dup2 (pipe_out, 1) < 0)
++            return -1;
++        }
++      else
++        {
++          *saved_stderr = codex_save_parent_fd (2);
++          if (*saved_stderr == -3 || dup2 (1, 2) < 0)
++            return -1;
++        }
++    }
++  return 0;
++}
++
++static void
++codex_restore_pipeline_parent (int saved_stdin, int saved_stdout,
++                               int saved_stderr)
++{
++  codex_restore_parent_fd (2, saved_stderr);
++  codex_restore_parent_fd (1, saved_stdout);
++  codex_restore_parent_fd (0, saved_stdin);
++}
++#else
++static int codex_spawn_external_enabled (void) { return 0; }
++#endif
++
+ static int shell_control_structure (enum command_type);
+ static void cleanup_redirects (REDIRECT *);
+ 
+@@ -4527,6 +4713,18 @@
+      should not. */
+   dofork = pipe_in != NO_PIPE || pipe_out != NO_PIPE || async;
+ 
++  /* For a plain external command in a pipeline/background job, defer
++     process creation until after command lookup so execute_disk_command can
++     use the Codex posix_spawn transport. Builtins, functions and leading
++     assignment forms keep the upstream early-fork semantics. */
++  if (dofork && codex_spawn_external_enabled () &&
++      simple_command->words && simple_command->words->word &&
++      (simple_command->words->word->flags & W_ASSIGNMENT) == 0 &&
++      simple_command->words->word->word &&
++      find_shell_builtin (simple_command->words->word->word) == 0 &&
++      find_function (simple_command->words->word->word) == 0)
++    dofork = 0;
++
+   /* Something like `%2 &' should restart job 2 in the background, not cause
+      the shell to fork here. */
+   if (dofork && pipe_in == NO_PIPE && pipe_out == NO_PIPE &&
+@@ -5773,7 +5971,7 @@
+ 		      struct fd_bitmap *fds_to_close, int cmdflags)
+ {
+   char *pathname, *command, **args, *p;
+-  int nofork, stdpath, result, fork_flags;
++  int nofork, stdpath, result, fork_flags, codex_spawn_result;
+   pid_t pid;
+   SHELL_VAR *hookf;
+   WORD_LIST *wl;
+@@ -5821,6 +6019,89 @@
+     }
+   else if (command == 0 && notfound_str == 0)	/* make sure */
+     init_notfound_str ();
++
++#if defined (__APPLE__)
++  /* CODEXAPP_SPAWN_REDIRECT_V7: Bash's ordinary external-command path
++     requires fork() whenever REDIRECTS is non-null. That is not reliable in
++     the pure TrollStore runtime. For foreground commands, including pipeline
++     stages, reproduce Bash's pipe-then-redirection ordering temporarily in the
++     parent, spawn the child while those descriptors are active, then restore
++     the parent immediately. Background commands with explicit redirections
++     remain on the upstream path until they get dedicated async handling. */
++  if (command && nofork == 0 && codex_spawn_external_enabled () &&
++      (redirects == 0 || async == 0))
++    {
++      int codex_spawn_redirected;
++      int codex_spawn_pipeline_preapplied;
++      int codex_saved_stdin, codex_saved_stdout, codex_saved_stderr;
++      int codex_pipe_in, codex_pipe_out;
++
++      codex_spawn_redirected = 0;
++      codex_spawn_pipeline_preapplied = 0;
++      codex_saved_stdin = codex_saved_stdout = codex_saved_stderr = -1;
++      codex_pipe_in = pipe_in;
++      codex_pipe_out = pipe_out;
++      if (redirects)
++        {
++          if (pipe_in != NO_PIPE || pipe_out != NO_PIPE)
++            {
++              if (codex_apply_pipeline_parent
++                    (pipe_in, pipe_out, &codex_saved_stdin,
++                     &codex_saved_stdout, &codex_saved_stderr) != 0)
++                {
++                  codex_restore_pipeline_parent
++                    (codex_saved_stdin, codex_saved_stdout,
++                     codex_saved_stderr);
++                  result = EX_REDIRFAIL;
++                  goto parent_return;
++                }
++              codex_spawn_pipeline_preapplied = 1;
++              codex_pipe_in = codex_pipe_out = NO_PIPE;
++            }
++          if (do_redirections (redirects, RX_ACTIVE|RX_UNDOABLE) != 0)
++            {
++              undo_partial_redirects ();
++              dispose_exec_redirects ();
++              if (codex_spawn_pipeline_preapplied)
++                codex_restore_pipeline_parent
++                  (codex_saved_stdin, codex_saved_stdout,
++                   codex_saved_stderr);
++              result = EX_REDIRFAIL;
++              goto parent_return;
++            }
++          codex_spawn_redirected = 1;
++        }
++
++      args = strvec_from_word_list (words, 0, 0, (int *)NULL);
++      codex_spawn_result = codex_spawn_external_command
++        (command, args, export_env, codex_pipe_in, codex_pipe_out, fds_to_close,
++         async, command_line);
++      /* CODEXAPP_SPAWN_ARGS_BORROW_WORDS: strvec_from_word_list(..., alloc=0)
++         only allocates the pointer
++         vector; each string still belongs to WORD_LIST. execute_simple_command
++         uses the final word immediately after execute_disk_command returns to
++         bind $_, so strvec_dispose() here freed live WORD_LIST storage and
++         caused the iOS Abort trap 6 / ASan use-after-free. */
++      free (args);
++      if (codex_spawn_redirected)
++        {
++          undo_partial_redirects ();
++          dispose_exec_redirects ();
++        }
++      if (codex_spawn_pipeline_preapplied)
++        codex_restore_pipeline_parent
++          (codex_saved_stdin, codex_saved_stdout, codex_saved_stderr);
++      if (codex_spawn_result == 0)
++        goto parent_return;
++      if (codex_spawn_result != ENOTSUP)
++        {
++          errno = codex_spawn_result;
++          internal_error ("%s: %s", command, strerror (codex_spawn_result));
++          result = (codex_spawn_result == ENOENT) ? EX_NOTFOUND : EX_NOEXEC;
++          goto parent_return;
++        }
++    }
++#endif
+ 
+   /* We have to make the child before we check for the non-existence
+      of COMMAND, since we want the error messages to be redirected. */
+--- a/jobs.c
++++ b/jobs.c
+@@ -2255,6 +2255,47 @@
+ {
+   cleanup_dead_jobs ();
+   map_over_jobs (print_job, format, -1);
++}
++
++/* Register a child created without make_child(), preserving the same
++   pipeline/job bookkeeping used by Bash's normal fork path. The caller must
++   have called making_children() and keep SIGCHLD blocked until this returns. */
++void
++register_spawned_child (char *command, pid_t pid, int flags)
++{
++  int async_p;
++  PROCESS *child;
++
++  async_p = (flags & FORK_ASYNC);
++
++  if (job_control)
++    {
++      if (pipeline_pgrp == 0)
++        pipeline_pgrp = pid;
++      if ((flags & FORK_NOJOB) == 0)
++        setpgid (pid, pipeline_pgrp);
++    }
++  else if (pipeline_pgrp == 0)
++    pipeline_pgrp = shell_pgrp;
++
++  child = add_process (command, pid);
++  if (flags & FORK_PROCSUB)
++    child->flags |= PROC_PROCSUB;
++  if (flags & FORK_COMSUB)
++    child->flags |= PROC_COMSUB;
++
++  if (async_p)
++    last_asynchronous_pid = pid;
++#if defined (RECYCLES_PIDS)
++  else if (last_asynchronous_pid == pid)
++    last_asynchronous_pid = 1;
++#endif
++
++  delete_old_job (pid);
++  bgp_delete (pid);
++  last_made_pid = pid;
++  js.c_totforked++;
++  js.c_living++;
+ }
+ 
+ /* Fork, handling errors.  Returns the pid of the newly made child, or 0.
+--- a/jobs.h
++++ b/jobs.h
+@@ -295,6 +295,7 @@
+ extern void list_running_jobs (int);
+ 
+ extern pid_t make_child (char *, int);
++extern void register_spawned_child (char *, pid_t, int);
+ 
+ extern int get_tty_state (void);
+ extern int set_tty_state (void);
