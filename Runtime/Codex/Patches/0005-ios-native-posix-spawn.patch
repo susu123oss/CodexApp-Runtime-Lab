@@ -1,0 +1,171 @@
+diff --git a/codex-rs/utils/pty/src/child.rs b/codex-rs/utils/pty/src/child.rs
+index dfb6ff2b..59d0fc93 100644
+--- a/codex-rs/utils/pty/src/child.rs
++++ b/codex-rs/utils/pty/src/child.rs
+@@ -11,7 +11,7 @@ use tokio::process::ChildStderr;
+ use tokio::process::ChildStdin;
+ use tokio::process::ChildStdout;
+ 
+-#[cfg(any(target_os = "macos", target_os = "linux"))]
++#[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+ #[path = "posix_child.rs"]
+ pub(super) mod posix;
+ 
+@@ -34,7 +34,7 @@ pub(super) enum ChildKind {
+         child: Option<tokio::process::Child>,
+         reaper: std::sync::mpsc::Sender<reaper::ChildToReap>,
+     },
+-    #[cfg(any(target_os = "macos", target_os = "linux"))]
++    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+     Native(posix::NativeChild),
+ }
+ 
+@@ -46,7 +46,7 @@ impl Child {
+             ChildKind::TokioReapOnly { child, .. } => {
+                 child.as_ref().and_then(tokio::process::Child::id)
+             }
+-            #[cfg(any(target_os = "macos", target_os = "linux"))]
++            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+             ChildKind::Native(child) => child.id(),
+         }
+     }
+@@ -64,7 +64,7 @@ impl Child {
+                     .wait()
+                     .await
+             }
+-            #[cfg(any(target_os = "macos", target_os = "linux"))]
++            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+             ChildKind::Native(child) => child.wait().await,
+         }
+     }
+@@ -114,7 +114,7 @@ impl Child {
+                     .kill()
+                     .await
+             }
+-            #[cfg(any(target_os = "macos", target_os = "linux"))]
++            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+             ChildKind::Native(child) => child.kill().await,
+         }
+     }
+diff --git a/codex-rs/utils/pty/src/child_command.rs b/codex-rs/utils/pty/src/child_command.rs
+index 452e3ecd..1c9774c2 100644
+--- a/codex-rs/utils/pty/src/child_command.rs
++++ b/codex-rs/utils/pty/src/child_command.rs
+@@ -264,11 +264,11 @@ impl Command {
+         if let ProcessMode::NewGroup = self.process_mode {
+             self.inner.process_group(/*pgroup*/ 0);
+         }
+-        #[cfg(any(target_os = "macos", target_os = "linux"))]
++        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+         {
+             let command = self.inner.as_std();
+             let program = command.get_program();
+-            #[cfg(target_os = "macos")]
++            #[cfg(any(target_os = "macos", target_os = "ios"))]
+             let use_native = Path::new(program).is_relative()
+                 || self.descriptor_policy == DescriptorPolicy::Explicit
+                 || self.fallback == SpawnFallback::ReturnError
+diff --git a/codex-rs/utils/pty/src/child_reaper.rs b/codex-rs/utils/pty/src/child_reaper.rs
+index 46f25ade..6147cd8d 100644
+--- a/codex-rs/utils/pty/src/child_reaper.rs
++++ b/codex-rs/utils/pty/src/child_reaper.rs
+@@ -5,7 +5,7 @@
+ //! ownership until reaped, so one live child cannot delay cleanup of another.
+ 
+ use std::io;
+-#[cfg(any(target_os = "macos", target_os = "linux"))]
++#[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+ use std::ptr;
+ use std::sync::Mutex;
+ use std::sync::PoisonError;
+@@ -14,7 +14,7 @@ use std::time::Duration;
+ 
+ /// Exclusive ownership transferred by a child handle after its caller drops it.
+ pub(crate) enum ChildToReap {
+-    #[cfg(any(target_os = "macos", target_os = "linux"))]
++    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+     Native(libc::pid_t),
+     Tokio(tokio::process::Child),
+ }
+@@ -47,7 +47,7 @@ pub(crate) fn sender() -> io::Result<mpsc::Sender<ChildToReap>> {
+                 // Amortize scans across bursts without starving reaping when drops continue.
+                 pending.extend(receiver.try_iter().take(REAP_BATCH_SIZE - 1));
+                 pending.retain_mut(|child| match child {
+-                    #[cfg(any(target_os = "macos", target_os = "linux"))]
++                    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+                     ChildToReap::Native(pid) => {
+                         // SAFETY: Drop transferred exclusive ownership of this PID.
+                         let result = unsafe { libc::waitpid(*pid, ptr::null_mut(), libc::WNOHANG) };
+diff --git a/codex-rs/utils/pty/src/posix_child.rs b/codex-rs/utils/pty/src/posix_child.rs
+index abf46c28..87e1ac3a 100644
+--- a/codex-rs/utils/pty/src/posix_child.rs
++++ b/codex-rs/utils/pty/src/posix_child.rs
+@@ -32,12 +32,12 @@ use crate::child::reaper;
+ #[cfg(target_os = "linux")]
+ use libc::POSIX_SPAWN_SETSID;
+ // Apple exposes this extension in spawn.h, but libc does not yet bind it.
+-#[cfg(target_os = "macos")]
++#[cfg(any(target_os = "macos", target_os = "ios"))]
+ const POSIX_SPAWN_SETSID: libc::c_int = 0x0400;
+ 
+ // Available since macOS 10.15 and in Rust's bundled musl. Older glibc needs
+ // runtime detection so this optimization does not raise our minimum libc version.
+-#[cfg(any(target_os = "macos", target_env = "musl"))]
++#[cfg(any(target_os = "macos", target_os = "ios", target_env = "musl"))]
+ unsafe extern "C" {
+     fn posix_spawn_file_actions_addchdir_np(
+         actions: *mut libc::posix_spawn_file_actions_t,
+@@ -132,7 +132,7 @@ impl NativeChild {
+                 >(symbol)
+             }
+         };
+-        #[cfg(any(target_os = "macos", target_env = "musl"))]
++        #[cfg(any(target_os = "macos", target_os = "ios", target_env = "musl"))]
+         let addchdir = posix_spawn_file_actions_addchdir_np;
+ 
+         // Subscribe before spawning so a child that exits immediately cannot be missed.
+@@ -185,7 +185,7 @@ impl NativeChild {
+                 ))?;
+             }
+             for target in &request.inherited_fds {
+-                #[cfg(target_os = "macos")]
++                #[cfg(any(target_os = "macos", target_os = "ios"))]
+                 let result = posix_spawn_file_actions_addinherit_np(&mut actions.0, *target);
+                 #[cfg(target_os = "linux")]
+                 let result =
+@@ -212,7 +212,7 @@ impl NativeChild {
+             cvt_errno(libc::sigemptyset(&mut defaults))?;
+             cvt_errno(libc::sigaddset(&mut defaults, libc::SIGPIPE))?;
+             cvt(libc::posix_spawnattr_setsigdefault(&mut attrs.0, &defaults))?;
+-            #[cfg(target_os = "macos")]
++            #[cfg(any(target_os = "macos", target_os = "ios"))]
+             let descriptor_flags = match request.descriptor_policy {
+                 crate::DescriptorPolicy::Inherit => 0,
+                 crate::DescriptorPolicy::Explicit => libc::POSIX_SPAWN_CLOEXEC_DEFAULT,
+@@ -251,7 +251,7 @@ impl NativeChild {
+                 let mut result = libc::ENOENT;
+                 for directory in std::env::split_paths(path) {
+                     let mut executable = directory.into_os_string();
+-                    #[cfg(target_os = "macos")]
++                    #[cfg(any(target_os = "macos", target_os = "ios"))]
+                     if executable.is_empty() {
+                         executable.push(".");
+                     }
+@@ -271,7 +271,7 @@ impl NativeChild {
+                     result = spawn(&c_string(&executable)?);
+                     match result {
+                         libc::ENOENT | libc::ENOTDIR | libc::EACCES => {}
+-                        #[cfg(target_os = "macos")]
++                        #[cfg(any(target_os = "macos", target_os = "ios"))]
+                         libc::ELOOP | libc::ENAMETOOLONG => {}
+                         #[cfg(all(target_os = "linux", target_env = "gnu"))]
+                         libc::ESTALE | libc::ENODEV | libc::ETIMEDOUT => {}
+@@ -442,7 +442,7 @@ fn cvt_errno(result: libc::c_int) -> io::Result<()> {
+ 
+ struct FileActions(libc::posix_spawn_file_actions_t);
+ 
+-#[cfg(target_os = "macos")]
++#[cfg(any(target_os = "macos", target_os = "ios"))]
+ unsafe extern "C" {
+     fn posix_spawn_file_actions_addinherit_np(
+         actions: *mut libc::posix_spawn_file_actions_t,
