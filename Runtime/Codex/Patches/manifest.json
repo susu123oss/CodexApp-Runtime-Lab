@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "name": "CodexApp iOS/TrollStore CLI patchset",
+  "canonical_upstream": {
+    "repository": "https://github.com/openai/codex.git",
+    "baseline_version": "0.162.1",
+    "baseline_commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d"
+  },
+  "patches": [
+    {
+      "order": 1,
+      "file": "0001-probe-bootstrap-shells.patch",
+      "sha256": "97e16dc8784516eab5fb57fd0614197b77b19bc8839fb6dc0617944c612e16d3",
+      "title": "Probe jailbreak bootstrap shells on iOS",
+      "purpose": "Teach Codex shell detection about RootHide .jbroot and rootless /var/jb shell locations, and allow iOS to use the same shell fallback strategy as macOS.",
+      "source_files": [
+        "codex-rs/shell-command/src/shell_detect.rs"
+      ],
+      "symbols": [
+        "roothide_shell",
+        "get_shell_path",
+        "ZSH_FALLBACK_PATHS",
+        "BASH_FALLBACK_PATHS",
+        "SH_FALLBACK_PATHS",
+        "ultimate_fallback_shell",
+        "default_user_shell_from_path"
+      ],
+      "environments": ["ios", "rootless", "roothide"],
+      "notes": "Recheck when upstream changes shell detection or adds first-class iOS/jailbreak shell discovery."
+    },
+    {
+      "order": 2,
+      "file": "0002-ios-no-wayland-arboard.patch",
+      "sha256": "c84f03da8e1b3ac114ef0774148b442baa372aa9dbc26d95d7f04c2e6d791b6c",
+      "title": "Keep Wayland clipboard backend Linux-only",
+      "purpose": "Prevent arboard's Wayland data-control backend from being selected while cross-compiling Codex for iOS.",
+      "source_files": [
+        "codex-rs/Cargo.toml",
+        "codex-rs/tui/Cargo.toml"
+      ],
+      "symbols": ["workspace.dependencies.arboard", "target-specific arboard dependency"],
+      "environments": ["ios", "build"],
+      "notes": "Can be retired if upstream scopes Wayland features to Linux without this patch."
+    },
+    {
+      "order": 3,
+      "file": "0003-ios-process-hardening.patch",
+      "sha256": "8b53e5459d8682e12d1a545fd0c573a123c24dcf8523c2f5d9ddd88f68dcd792",
+      "title": "Enable process-hardening Unix path on iOS",
+      "purpose": "Include iOS in the Unix process-hardening target set so the crate compiles and uses the intended Apple/Unix implementation.",
+      "source_files": [
+        "codex-rs/process-hardening/src/lib.rs"
+      ],
+      "symbols": ["target_os cfg list"],
+      "environments": ["ios", "build", "runtime"],
+      "notes": "Recheck if upstream adds iOS to this cfg or restructures process-hardening."
+    },
+    {
+      "order": 4,
+      "file": "0004-ios-system-config-path.patch",
+      "sha256": "3f50d83eeba8e9f387d71221be34aa00f2f7c3ce700a05a3d806bbc75359f4a7",
+      "title": "Resolve jailbreak system config paths on iOS",
+      "purpose": "Resolve /etc/codex/config.toml through RootHide .jbroot or rootless /var/jb because Codex is not libvroot-linked.",
+      "source_files": [
+        "codex-rs/config/src/loader/mod.rs"
+      ],
+      "symbols": ["system_config_toml_file"],
+      "environments": ["ios", "rootless", "roothide"],
+      "notes": "Retire only when upstream has an equivalent iOS jailbreak bootstrap-aware config resolver."
+    },
+    {
+      "order": 5,
+      "file": "0005-ios-native-posix-spawn.patch",
+      "sha256": "516b030032c898a2785e4b541b11bb219e766170ff5b23e656565383b29610fd",
+      "title": "Use Codex native Apple posix_spawn backend on iOS",
+      "purpose": "Enable the existing native PTY child implementation and Apple posix_spawn extensions on iOS so pure TrollStore unified exec does not fall back to fork/pre_exec and exit 138.",
+      "source_files": [
+        "codex-rs/utils/pty/src/child.rs",
+        "codex-rs/utils/pty/src/child_command.rs",
+        "codex-rs/utils/pty/src/child_reaper.rs",
+        "codex-rs/utils/pty/src/posix_child.rs"
+      ],
+      "symbols": [
+        "ChildKind::Native",
+        "Command::spawn",
+        "ChildToReap::Native",
+        "NativeChild",
+        "POSIX_SPAWN_SETSID",
+        "posix_spawn_file_actions_addchdir_np",
+        "posix_spawn_file_actions_addinherit_np"
+      ],
+      "environments": ["ios", "trollstore", "runtime", "unified_exec"],
+      "depends_on": [4],
+      "notes": "Critical TrollStore runtime patch. Re-evaluate against every upstream PTY/child-process refactor."
+    },
+    {
+      "order": 6,
+      "file": "0006-ios-poll-native-child-exit.patch",
+      "sha256": "ed75e48c65d587d9404c88a0dfa0d84c161f3c7766c7ac8489eaabd986054a8a",
+      "title": "Poll waitpid on iOS when Tokio SIGCHLD is unavailable",
+      "purpose": "Prevent already-exited forkless TrollStore commands from remaining permanently running when Tokio does not receive SIGCHLD; ensures terminal status, exitCode and item.completed can arrive.",
+      "source_files": [
+        "codex-rs/utils/pty/src/posix_child.rs"
+      ],
+      "symbols": ["NativeChild::wait"],
+      "environments": ["ios", "trollstore", "runtime", "tool_lifecycle"],
+      "depends_on": [5],
+      "notes": "Critical lifecycle patch. Remove only after real-device proof that upstream child waiting works reliably on pure TrollStore iOS."
+    },
+    {
+      "order": 7,
+      "file": "0007-ios-usershell-no-pre-exec.patch",
+      "sha256": "6b777984c2c9113d03afe624bb4439fc1c2555fed3b4f9591b3c6a9594f50203",
+      "title": "Keep iOS UserShell on a posix_spawn-compatible launch path",
+      "purpose": "Avoid the pure TrollStore SIGBUS seen in thread/shellCommand by removing the iOS RedirectForShellTool pre_exec(setsid) callback and using a dedicated process group instead, preserving cancellation cleanup while keeping Apple's posix_spawn path eligible.",
+      "source_files": [
+        "codex-rs/core/src/spawn.rs"
+      ],
+      "symbols": [
+        "spawn_child_async",
+        "StdioPolicy::RedirectForShellTool",
+        "CommandExt::process_group"
+      ],
+      "environments": ["ios", "trollstore", "runtime", "user_shell", "app_server"],
+      "depends_on": [5, 6],
+      "notes": "Derived from pure TrollStore diagnostics where UserShell completed failed with execution error Sandbox(Signal(10)); iOS SDK defines signal 10 as SIGBUS. UserShell requests SandboxType::None, so this is a process-launch failure rather than a filesystem sandbox denial."
+    },
+    {
+      "order": 8,
+      "file": "0008-ios-unified-exec-new-group.patch",
+      "sha256": "93fdc301034ad0a241caf6d64d5bb4beec7f6e93be79d70706309497677d5aa0",
+      "title": "Use a process group for iOS unified exec",
+      "purpose": "Avoid POSIX_SPAWN_SETSID EPERM only on CodexApp forkless RootHide/DEB while retaining native posix_spawn and process-group cancellation for unified exec.",
+      "source_files": [
+        "codex-rs/utils/pty/src/pipe.rs"
+      ],
+      "symbols": [
+        "spawn_process_with_stdin_mode",
+        "ProcessMode::NewGroup",
+        "DescriptorPolicy::Explicit"
+      ],
+      "environments": ["ios", "ios18", "roothide", "deb", "forkless", "unified_exec"],
+      "depends_on": [5, 6],
+      "notes": "Requires CODEXAPP_SPAWN_EXTERNAL=1, CA_RUNTIME_ROOT_MODE=roothide and CA_RUNTIME_INSTALL_CHANNEL=deb; other iOS installs and non-iOS targets continue using NewSession."
+    },
+    {
+      "order": 9,
+      "file": "0009-ios-config-path-eperm.patch",
+      "sha256": "e077ae40ba48716a2801bd14a79702690e3bdc5979422a1880c599ce3c57c13b",
+      "title": "Keep iOS config probing inside jailbreak paths",
+      "purpose": "Avoid RootHide/DEB EPERM from the real /etc/codex path by resolving system and managed config through .jbroot or /var/jb on iOS.",
+      "source_files": [
+        "codex-rs/config/src/loader/layer_io.rs",
+        "codex-rs/config/src/loader/mod.rs"
+      ],
+      "symbols": [
+        "system_config_toml_file",
+        "managed_config_default_path"
+      ],
+      "environments": ["ios", "ios16", "ios18", "rootless", "roothide"],
+      "depends_on": [4],
+      "notes": "iOS-only. Non-iOS system and managed config paths remain unchanged."
+    },
+    {
+      "order": 10,
+      "file": "0010-ios-pty-eperm-pipe-fallback.patch",
+      "sha256": "1c73ac024e25222bb3c56b16931c22dcec3c8c4bfaa21f4388638ec5cceef834",
+      "title": "Fallback denied iOS RootHide PTY launches to pipes",
+      "purpose": "Keep tty-requested unified exec usable when iOS 18 RootHide/DEB rejects openpty with EPERM, without globally disabling PTY support.",
+      "source_files": [
+        "codex-rs/utils/pty/src/pty.rs"
+      ],
+      "symbols": [
+        "spawn_process",
+        "spawn_process_preserving_fds",
+        "should_fallback_pty_to_pipe"
+      ],
+      "environments": ["ios", "ios18", "roothide", "deb", "forkless", "unified_exec", "tty"],
+      "depends_on": [5, 6, 8],
+      "notes": "Fallback is limited to CodexApp forkless RootHide/DEB and PTY permission-denied errors; other PTY failures remain errors. Pipe fallback keeps stdin writable and preserves inherited descriptors."
+    }
+  ],
+  "related_non_cli_patches": [
+    {
+      "file": "ThirdParty/bash/codex-posix-spawn.patch",
+      "sha256": "589b507990aefde846fe79608270746b9755f1bfb9e651c1ec907a654ee51c2d",
+      "title": "Bash forkless posix_spawn compatibility",
+      "scope": "Bundled Bash runtime, not OpenAI Codex source",
+      "notes": "Managed separately from the numbered Codex CLI patchset."
+    }
+  ]
+}
