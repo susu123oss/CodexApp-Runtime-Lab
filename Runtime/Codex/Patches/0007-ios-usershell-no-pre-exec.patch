@@ -1,0 +1,22 @@
+diff --git a/codex-rs/core/src/spawn.rs b/codex-rs/core/src/spawn.rs
+index 79526b8b..9a305953 100644
+--- a/codex-rs/core/src/spawn.rs
++++ b/codex-rs/core/src/spawn.rs
+@@ -96,7 +96,16 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
+     // any child processes that were spawned as part of a `"shell"` tool call
+     // to also be terminated.
+ 
+-    #[cfg(unix)]
++    #[cfg(target_os = "ios")]
++    if matches!(stdio_policy, StdioPolicy::RedirectForShellTool) {
++        // TrollStore cannot safely use the fork/pre_exec path that Tokio falls
++        // back to when a pre_exec callback is installed. A dedicated process
++        // group is sufficient for cancellation/timeout cleanup on iOS and
++        // keeps the command eligible for Apple's posix_spawn implementation.
++        cmd.process_group(0);
++    }
++
++    #[cfg(all(unix, not(target_os = "ios")))]
+     unsafe {
+         let detach_from_tty = matches!(stdio_policy, StdioPolicy::RedirectForShellTool);
+         #[cfg(target_os = "linux")]
