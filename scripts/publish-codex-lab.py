@@ -127,7 +127,7 @@ def version_parts(version: str) -> tuple[int, int, int, int]:
     return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
 
 
-def prepare_manifest(old: dict, version: str, deb: Path, digest: str) -> dict:
+def prepare_manifest(old: dict, version: str, deb: Path, digest: str, candidate_tag: str) -> dict:
     if not isinstance(old, dict) or not isinstance(old.get("runtimes"), dict):
         raise ValueError("Lab manifest has invalid structure")
     current = old["runtimes"].get("codex")
@@ -142,6 +142,7 @@ def prepare_manifest(old: dict, version: str, deb: Path, digest: str) -> dict:
     codex = dict(current)
     codex.update({
         "archive_sha256": digest,
+        "candidate_tag": candidate_tag,
         "archive_url": f"https://github.com/{LAB_REPO}/releases/download/{release_tag}/{deb.name}",
         "asset_name": deb.name,
         "display_name": "Codex · 实验室版",
@@ -186,7 +187,7 @@ def publish(deb: Path, sums: Path, candidate_tag: str, token: str) -> None:
         raise RuntimeError("Lab manifest could not be read")
 
     # Preflight the entire next manifest *before* creating a public Release.
-    next_manifest = prepare_manifest(existing, version, deb, digest)
+    next_manifest = prepare_manifest(existing, version, deb, digest, candidate_tag)
     release_tag = f"runtime-codex-v{version}"
     status, old_release = api(f"{root}/releases/tags/{release_tag}", token)
     if status == 200:
