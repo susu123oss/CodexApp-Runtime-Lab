@@ -154,12 +154,21 @@ jobs:
           fi
 
       - name: Dispatch macOS Laboratory build
+        id: dispatch
         if: steps.gate.outputs.action == 'dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           FORCE_REQUESTED: ${{ github.event.inputs.force || 'false' }}
         run: |
+          set -euo pipefail
+          active="$(gh run list --workflow codex-runtime-candidate.yml --limit 20 --json status --jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')"
+          if [[ "$active" != "0" ]]; then
+            echo "Existing Codex Laboratory Runtime run is already active; dispatch suppressed."
+            echo "dispatched=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           gh workflow run codex-runtime-candidate.yml --ref main -f force="$FORCE_REQUESTED"
+          echo "dispatched=true" >>"$GITHUB_OUTPUT"
 
       - name: Monitoring summary
         env:
