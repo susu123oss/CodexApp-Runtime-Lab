@@ -20,8 +20,6 @@ on:
       - "scripts/codex-patchset.py"
       - "scripts/publish-codex-runtime.py"
       - "scripts/publish-codex-lab.py"
-  schedule:
-    - cron: "20 0 * * *"
 
 permissions:
   contents: write
