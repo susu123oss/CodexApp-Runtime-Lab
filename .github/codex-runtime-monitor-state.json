@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "candidate_tag": "codex-candidate-v0.163.0-23ea3e420a27",
+  "status": "published",
+  "failure_count": 0,
+  "last_attempt_at": "2026-10-18T07:52:37Z",
+  "retry_after": null,
+  "last_result": "success",
+  "heartbeat_at": "2026-10-22T00:00:00Z"
+}
