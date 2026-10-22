@@ -1,0 +1,186 @@
+name: Codex Laboratory Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "立即触发一次 Lab Runtime 构建并忽略退避"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "20 0 * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: codex-runtime-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    name: Monitor OpenAI Codex stable candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out Laboratory repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify canonical patchset
+        run: python3 scripts/codex-patchset.py verify
+
+      - name: Resolve latest OpenAI stable release
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/codex-candidate-plan.py --github-output "$GITHUB_OUTPUT"
+
+      - name: Decide whether macOS build is allowed
+        id: gate
+        env:
+          CANDIDATE_TAG: ${{ steps.plan.outputs.candidate_tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          FORCE_REQUESTED: ${{ github.event.inputs.force || 'false' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone, timedelta
+          from pathlib import Path
+
+          state_path = Path(".github/codex-runtime-monitor-state.json")
+          manifest = json.loads(Path("Runtime/runtime-manifest.json").read_text())
+          entry = (manifest.get("runtimes") or {}).get("codex") or {}
+          published_candidate = str(entry.get("candidate_tag") or "")
+          candidate = os.environ["CANDIDATE_TAG"]
+          force = os.environ.get("FORCE_REQUESTED", "false").lower() == "true"
+          state = json.loads(state_path.read_text()) if state_path.exists() else {"schema": 1}
+          now = datetime.now(timezone.utc)
+
+          def parse_time(value):
+              if not value:
+                  return None
+              try:
+                  return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+              except ValueError:
+                  return None
+
+          def iso(value):
+              return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+          heartbeat = parse_time(state.get("heartbeat_at"))
+          heartbeat_due = heartbeat is None or now - heartbeat >= timedelta(days=30)
+          same_state_candidate = str(state.get("candidate_tag") or "") == candidate
+          retry_after = parse_time(state.get("retry_after")) if same_state_candidate else None
+          status = str(state.get("status") or "") if same_state_candidate else ""
+          failures = int(state.get("failure_count") or 0) if same_state_candidate else 0
+
+          action = "idle"
+          decision = "already-published"
+
+          if published_candidate == candidate and not force:
+              state.update({
+                  "schema": 1,
+                  "candidate_tag": candidate,
+                  "status": "published",
+                  "failure_count": 0,
+                  "retry_after": None,
+                  "last_result": "success",
+              })
+          else:
+              if force:
+                  action = "dispatch"
+                  decision = "manual-force"
+              elif same_state_candidate and status == "attempting" and retry_after and now < retry_after:
+                  action = "wait"
+                  decision = "backoff"
+              else:
+                  # If a previous attempt did not publish by its retry deadline,
+                  # count it as failed/stuck and widen the next retry window.
+                  if same_state_candidate and status == "attempting" and retry_after and now >= retry_after:
+                      failures += 1
+                  else:
+                      failures = 0
+                  action = "dispatch"
+                  decision = "new-candidate" if failures == 0 else "retry-due"
+
+              if action == "dispatch":
+                  delay_days = (1, 3, 7, 14)[min(failures, 3)]
+                  state.update({
+                      "schema": 1,
+                      "candidate_tag": candidate,
+                      "status": "attempting",
+                      "failure_count": failures,
+                      "last_attempt_at": iso(now),
+                      "last_result": "pending",
+                      "retry_after": iso(now + timedelta(days=delay_days)),
+                  })
+
+          if heartbeat_due:
+              state["heartbeat_at"] = iso(now)
+
+          state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+          retry_text = str(state.get("retry_after") or "")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"action={action}\n")
+              out.write(f"decision={decision}\n")
+              out.write(f"retry_after={retry_text}\n")
+              out.write(f"failure_count={int(state.get('failure_count') or 0)}\n")
+
+          print(json.dumps({
+              "candidate": candidate,
+              "published_candidate": published_candidate,
+              "action": action,
+              "decision": decision,
+              "retry_after": retry_text,
+              "failure_count": int(state.get("failure_count") or 0),
+              "heartbeat_due": heartbeat_due,
+          }, indent=2))
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/codex-runtime-monitor-state.json
+          if ! git diff --cached --quiet; then
+            git commit -m "ci(lab): update Codex Runtime monitor state"
+            git push origin HEAD:main
+          fi
+
+      - name: Dispatch macOS Laboratory build
+        if: steps.gate.outputs.action == 'dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_REQUESTED: ${{ github.event.inputs.force || 'false' }}
+        run: |
+          gh workflow run codex-runtime-candidate.yml --ref main -f force="$FORCE_REQUESTED"
+
+      - name: Monitoring summary
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          CANDIDATE_TAG: ${{ steps.plan.outputs.candidate_tag }}
+          ACTION: ${{ steps.gate.outputs.action }}
+          DECISION: ${{ steps.gate.outputs.decision }}
+          RETRY_AFTER: ${{ steps.gate.outputs.retry_after }}
+          FAILURE_COUNT: ${{ steps.gate.outputs.failure_count }}
+        run: |
+          {
+            echo "### Codex Laboratory monitor"
+            echo
+            echo "- OpenAI stable: rust-v${VERSION}"
+            echo "- candidate: ${CANDIDATE_TAG}"
+            echo "- action: ${ACTION}"
+            echo "- decision: ${DECISION}"
+            echo "- failure count: ${FAILURE_COUNT}"
+            if [[ -n "$RETRY_AFTER" ]]; then
+              echo "- next macOS retry allowed after: ${RETRY_AFTER}"
+            fi
+            echo "- monitor runner: ubuntu-latest"
+            echo "- macOS build is dispatched only when allowed by the state gate"
+          } >>"$GITHUB_STEP_SUMMARY"
