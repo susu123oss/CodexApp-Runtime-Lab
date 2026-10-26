@@ -1,5 +1,5 @@
 diff --git a/codex-rs/utils/pty/src/child.rs b/codex-rs/utils/pty/src/child.rs
-index dfb6ff2b..59d0fc93 100644
+index dfb6ff2..59d0fc9 100644
 --- a/codex-rs/utils/pty/src/child.rs
 +++ b/codex-rs/utils/pty/src/child.rs
 @@ -11,7 +11,7 @@ use tokio::process::ChildStderr;
@@ -48,7 +48,7 @@ index dfb6ff2b..59d0fc93 100644
          }
      }
 diff --git a/codex-rs/utils/pty/src/child_command.rs b/codex-rs/utils/pty/src/child_command.rs
-index 452e3ecd..1c9774c2 100644
+index 452e3ec..1c9774c 100644
 --- a/codex-rs/utils/pty/src/child_command.rs
 +++ b/codex-rs/utils/pty/src/child_command.rs
 @@ -264,11 +264,11 @@ impl Command {
@@ -66,7 +66,7 @@ index 452e3ecd..1c9774c2 100644
                  || self.descriptor_policy == DescriptorPolicy::Explicit
                  || self.fallback == SpawnFallback::ReturnError
 diff --git a/codex-rs/utils/pty/src/child_reaper.rs b/codex-rs/utils/pty/src/child_reaper.rs
-index 46f25ade..6147cd8d 100644
+index 46f25ad..6147cd8 100644
 --- a/codex-rs/utils/pty/src/child_reaper.rs
 +++ b/codex-rs/utils/pty/src/child_reaper.rs
 @@ -5,7 +5,7 @@
@@ -97,7 +97,7 @@ index 46f25ade..6147cd8d 100644
                          // SAFETY: Drop transferred exclusive ownership of this PID.
                          let result = unsafe { libc::waitpid(*pid, ptr::null_mut(), libc::WNOHANG) };
 diff --git a/codex-rs/utils/pty/src/posix_child.rs b/codex-rs/utils/pty/src/posix_child.rs
-index abf46c28..87e1ac3a 100644
+index 436263a..8d51b1b 100644
 --- a/codex-rs/utils/pty/src/posix_child.rs
 +++ b/codex-rs/utils/pty/src/posix_child.rs
 @@ -32,12 +32,12 @@ use crate::child::reaper;
@@ -124,8 +124,8 @@ index abf46c28..87e1ac3a 100644
          let addchdir = posix_spawn_file_actions_addchdir_np;
  
          // Subscribe before spawning so a child that exits immediately cannot be missed.
-@@ -185,7 +185,7 @@ impl NativeChild {
-                 ))?;
+@@ -193,7 +193,7 @@ impl NativeChild {
+                 cvt(result)?;
              }
              for target in &request.inherited_fds {
 -                #[cfg(target_os = "macos")]
@@ -133,7 +133,7 @@ index abf46c28..87e1ac3a 100644
                  let result = posix_spawn_file_actions_addinherit_np(&mut actions.0, *target);
                  #[cfg(target_os = "linux")]
                  let result =
-@@ -212,7 +212,7 @@ impl NativeChild {
+@@ -220,7 +220,7 @@ impl NativeChild {
              cvt_errno(libc::sigemptyset(&mut defaults))?;
              cvt_errno(libc::sigaddset(&mut defaults, libc::SIGPIPE))?;
              cvt(libc::posix_spawnattr_setsigdefault(&mut attrs.0, &defaults))?;
@@ -142,7 +142,7 @@ index abf46c28..87e1ac3a 100644
              let descriptor_flags = match request.descriptor_policy {
                  crate::DescriptorPolicy::Inherit => 0,
                  crate::DescriptorPolicy::Explicit => libc::POSIX_SPAWN_CLOEXEC_DEFAULT,
-@@ -251,7 +251,7 @@ impl NativeChild {
+@@ -259,7 +259,7 @@ impl NativeChild {
                  let mut result = libc::ENOENT;
                  for directory in std::env::split_paths(path) {
                      let mut executable = directory.into_os_string();
@@ -151,7 +151,7 @@ index abf46c28..87e1ac3a 100644
                      if executable.is_empty() {
                          executable.push(".");
                      }
-@@ -271,7 +271,7 @@ impl NativeChild {
+@@ -279,7 +279,7 @@ impl NativeChild {
                      result = spawn(&c_string(&executable)?);
                      match result {
                          libc::ENOENT | libc::ENOTDIR | libc::EACCES => {}
@@ -160,7 +160,7 @@ index abf46c28..87e1ac3a 100644
                          libc::ELOOP | libc::ENAMETOOLONG => {}
                          #[cfg(all(target_os = "linux", target_env = "gnu"))]
                          libc::ESTALE | libc::ENODEV | libc::ETIMEDOUT => {}
-@@ -442,7 +442,7 @@ fn cvt_errno(result: libc::c_int) -> io::Result<()> {
+@@ -450,7 +450,7 @@ fn cvt_errno(result: libc::c_int) -> io::Result<()> {
  
  struct FileActions(libc::posix_spawn_file_actions_t);
  
