@@ -31,7 +31,7 @@
     {
       "order": 2,
       "file": "0002-ios-no-wayland-arboard.patch",
-      "sha256": "c84f03da8e1b3ac114ef0774148b442baa372aa9dbc26d95d7f04c2e6d791b6c",
+      "sha256": "ae5df1eaf9a99d7762264a42a8cb4af9378f4d622e253d7052428ead8a465f8c",
       "title": "Keep Wayland clipboard backend Linux-only",
       "purpose": "Prevent arboard's Wayland data-control backend from being selected while cross-compiling Codex for iOS.",
       "source_files": [
@@ -71,7 +71,7 @@
     {
       "order": 5,
       "file": "0005-ios-native-posix-spawn.patch",
-      "sha256": "516b030032c898a2785e4b541b11bb219e766170ff5b23e656565383b29610fd",
+      "sha256": "cf75415239a36ebbe80a1cff55665f8f54bdfa413db3b29fd8803f07b901b4cf",
       "title": "Use Codex native Apple posix_spawn backend on iOS",
       "purpose": "Enable the existing native PTY child implementation and Apple posix_spawn extensions on iOS so pure TrollStore unified exec does not fall back to fork/pre_exec and exit 138.",
       "source_files": [
