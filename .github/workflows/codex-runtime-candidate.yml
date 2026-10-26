@@ -221,12 +221,9 @@ jobs:
           path: |
             ${{ github.workspace }}/.candidate/packaging/build/ios-arm64/cargo-home
             ${{ github.workspace }}/.candidate/packaging/build/ios-arm64/target
-            ${{ github.workspace }}/.candidate/packaging/build/ios-arm64/rusty-v8
-          key: codex-ios-${{ runner.os }}-${{ steps.pins.outputs.rust_toolchain }}-${{ steps.pins.outputs.rusty_v8_ref }}-${{ needs.plan.outputs.patch_digest }}-${{ steps.xcode.outputs.fingerprint }}
+          key: codex-ios-v2-${{ runner.os }}-${{ steps.pins.outputs.rust_toolchain }}-${{ steps.pins.outputs.rusty_v8_ref }}-${{ needs.plan.outputs.patch_digest }}-${{ steps.xcode.outputs.fingerprint }}
           restore-keys: |
-            codex-ios-${{ runner.os }}-${{ steps.pins.outputs.rust_toolchain }}-${{ steps.pins.outputs.rusty_v8_ref }}-
-            codex-ios-${{ runner.os }}-${{ steps.pins.outputs.rust_toolchain }}-
-            codex-ios-${{ runner.os }}-
+            codex-ios-v2-${{ runner.os }}-${{ steps.pins.outputs.rust_toolchain }}-${{ steps.pins.outputs.rusty_v8_ref }}-${{ needs.plan.outputs.patch_digest }}-
 
       - name: Validate reusable iOS packaging toolchain
         run: |
@@ -249,6 +246,9 @@ jobs:
           python3 scripts/codex-patchset.py verify
 
       - name: Build Codex CLI and Code Mode Host for iOS
+        env:
+          MAKEFLAGS: ""
+          CARGO_MAKEFLAGS: ""
         run: make -C "$PACKAGING_ROOT" --no-print-directory build
 
       - name: Package CodexApp Laboratory Runtime
