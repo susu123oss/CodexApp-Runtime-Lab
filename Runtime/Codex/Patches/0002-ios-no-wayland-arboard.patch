@@ -1,18 +1,18 @@
 diff --git a/codex-rs/Cargo.toml b/codex-rs/Cargo.toml
-index 04823402..b4828064 100644
+index 520b941..beac48e 100644
 --- a/codex-rs/Cargo.toml
 +++ b/codex-rs/Cargo.toml
-@@ -328,7 +328,7 @@ age = "0.12.1"
+@@ -333,7 +333,7 @@ core_test_support = { path = "core/tests/common" }
+ age = "0.12.1"
  ansi-to-tui = "8.0.1"
  anyhow = "1"
- appcontainer_common = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
 -arboard = { version = "3", features = ["wayland-data-control"] }
 +arboard = { version = "3" }
  arc-swap = "1.9.0"
  assert_cmd = "2"
  assert_matches = "1.5.0"
 diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
-index 45f58665..d8e273ad 100644
+index 47968b8..d916570 100644
 --- a/codex-rs/tui/Cargo.toml
 +++ b/codex-rs/tui/Cargo.toml
 @@ -145,8 +145,9 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"
