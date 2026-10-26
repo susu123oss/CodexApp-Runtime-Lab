@@ -45,11 +45,12 @@
     {
       "order": 3,
       "file": "0003-ios-process-hardening.patch",
-      "sha256": "8b53e5459d8682e12d1a545fd0c573a123c24dcf8523c2f5d9ddd88f68dcd792",
+      "sha256": "19718c4b9bf8514c4852fc4c15299b29ae6aef614f9f2dc9229fefce3f00205d",
       "title": "Enable process-hardening Unix path on iOS",
-      "purpose": "Include iOS in the Unix process-hardening target set so the crate compiles and uses the intended Apple/Unix implementation.",
+      "purpose": "Include iOS in the Unix process-hardening target set and keep the Windows-only MXC SDK dependency out of iOS builds.",
       "source_files": [
-        "codex-rs/process-hardening/src/lib.rs"
+        "codex-rs/process-hardening/src/lib.rs",
+        "codex-rs/mxc-sandbox/Cargo.toml"
       ],
       "symbols": ["target_os cfg list"],
       "environments": ["ios", "build", "runtime"],

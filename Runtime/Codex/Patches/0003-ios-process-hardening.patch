@@ -1,7 +1,8 @@
 diff --git a/codex-rs/process-hardening/src/lib.rs b/codex-rs/process-hardening/src/lib.rs
 --- a/codex-rs/process-hardening/src/lib.rs
 +++ b/codex-rs/process-hardening/src/lib.rs
-@@ -34,6 +34,7 @@ const PTRACE_DENY_ATTACH_FAILED_EXIT_CODE: i32 = 6;
+@@ -31,8 +31,9 @@
+ #[cfg(any(
      target_os = "linux",
      target_os = "android",
      target_os = "macos",
@@ -9,3 +10,20 @@ diff --git a/codex-rs/process-hardening/src/lib.rs b/codex-rs/process-hardening/
      target_os = "freebsd",
      target_os = "netbsd",
      target_os = "openbsd"
+ ))]
+ const SET_RLIMIT_CORE_FAILED_EXIT_CODE: i32 = 7;
+diff --git a/codex-rs/mxc-sandbox/Cargo.toml b/codex-rs/mxc-sandbox/Cargo.toml
+--- a/codex-rs/mxc-sandbox/Cargo.toml
++++ b/codex-rs/mxc-sandbox/Cargo.toml
+@@ -20,7 +20,6 @@ codex-protocol = { workspace = true }
+ codex-utils-absolute-path = { workspace = true }
+ codex-utils-path-uri = { workspace = true }
+ codex-windows-sandbox = { workspace = true }
+-mxc-sdk = { workspace = true }
+ serde = { workspace = true, features = ["derive"] }
+ serde_json = { workspace = true }
+ thiserror = { workspace = true }
+@@ -27,2 +26,3 @@ thiserror = { workspace = true }
+ [target.'cfg(windows)'.dependencies]
++mxc-sdk = { workspace = true }
+ flatbuffers = { workspace = true }
