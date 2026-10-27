@@ -75,6 +75,29 @@ jobs:
           path: nodejs-mobile/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework
           key: node24-framework-ios-arm64-macos15-xcode16.4-4608d3c6-v1
 
+      - name: Reclaim macOS runner disk for Node/V8 build
+        if: steps.framework-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          KEEP_XCODE="$(xcode-select -p | sed 's#/Contents/Developer##')"
+          echo "Keeping Xcode: $KEEP_XCODE"
+          echo "===== disk before cleanup ====="
+          df -h "$GITHUB_WORKSPACE"
+          echo "===== installed Xcode bundles ====="
+          du -sh /Applications/Xcode*.app 2>/dev/null || true
+          for app in /Applications/Xcode*.app; do
+            if [ -L "$app" ]; then
+              continue
+            fi
+            if [ "$app" != "$KEEP_XCODE" ]; then
+              echo "Removing unused Xcode: $app"
+              sudo rm -rf "$app"
+            fi
+          done
+          rm -rf "$HOME/Library/Developer/CoreSimulator/Caches" 2>/dev/null || true
+          echo "===== disk after cleanup ====="
+          df -h "$GITHUB_WORKSPACE"
+
       - name: Show disk space before build
         if: steps.framework-cache.outputs.cache-hit != 'true'
         run: |
