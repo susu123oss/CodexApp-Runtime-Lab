@@ -8,21 +8,21 @@
   ],
   "runtimes": {
     "codex": {
-      "archive_sha256": "0f1bca79fe6de14aa440972d0241e76dd7b89dbfb9a66472257d15abfe51dabe",
-      "candidate_tag": "codex-candidate-v0.163.0-48e8e9432c05",
-      "archive_url": "https://github.com/susu123oss/CodexApp-Runtime-Lab/releases/download/runtime-codex-v0.163.0-1/wiki.qaq.codex_0.163.0-1_iphoneos-arm64.deb",
-      "asset_name": "wiki.qaq.codex_0.163.0-1_iphoneos-arm64.deb",
+      "archive_sha256": "28f6e55599b796fe2c09750061d0955bffa91193bb8759b0bc3bf2e29e6fad81",
+      "candidate_tag": "codex-candidate-v0.164.0-23f63b004943",
+      "archive_url": "https://github.com/susu123oss/CodexApp-Runtime-Lab/releases/download/runtime-codex-v0.164.0-0/wiki.qaq.codex_0.164.0-0_iphoneos-arm64.deb",
+      "asset_name": "wiki.qaq.codex_0.164.0-0_iphoneos-arm64.deb",
       "display_name": "Codex · 实验室版",
-      "download_size": 102640294,
+      "download_size": 104469976,
       "group": "core",
       "handler": "codex",
       "minimum_ios": "15.0",
       "optional": false,
       "order": 10,
-      "release_tag": "runtime-codex-v0.163.0-1",
+      "release_tag": "runtime-codex-v0.164.0-0",
       "runtime_format": 1,
       "summary": "实验室 Codex CLI 与 Code Mode Host；需用户手动选择通道并确认安装。",
-      "version": "v0.163.0-1"
+      "version": "v0.164.0-0"
     }
   }
 }
