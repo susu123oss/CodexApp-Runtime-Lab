@@ -64,11 +64,43 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Install ccache
+        run: |
+          brew install ccache
+          ccache --version
+
+      - name: Restore Node 24 compilation cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache-node24-ios
+          key: node24-ios-arm64-macos15-4608d3c6-${{ runner.arch }}-${{ hashFiles('.github/workflows/node24-ios-experiment.yml') }}
+          restore-keys: |
+            node24-ios-arm64-macos15-4608d3c6-${{ runner.arch }}-
+
       - name: Build NodeMobile framework
         working-directory: nodejs-mobile
         run: |
           set -o pipefail
+          export CCACHE_DIR="$HOME/.cache/ccache-node24-ios"
+          export CCACHE_MAXSIZE=3G
+          export CCACHE_COMPRESS=true
+          export CCACHE_BASEDIR="$GITHUB_WORKSPACE/nodejs-mobile"
+          export CC="ccache clang"
+          export CXX="ccache clang++"
+          ccache -z
           bash tools/ios_framework_prepare.sh arm64 > ../node24-build.log 2>&1
+          ccache -s
+
+      - name: Save Node 24 compilation cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache-node24-ios
+          key: node24-ios-arm64-macos15-4608d3c6-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Show ccache statistics
+        if: always()
+        run: ccache -s || true
 
       - name: Show build log tail on failure
         if: failure()
