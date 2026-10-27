@@ -16,7 +16,7 @@ jobs:
   build-node24-ios-arm64:
     name: Build NodeMobile 24.5.0 for iPhoneOS arm64
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 180
 
     steps:
       - name: Checkout lab branch
@@ -67,8 +67,29 @@ jobs:
 
       - name: Build NodeMobile framework
         working-directory: nodejs-mobile
+        timeout-minutes: 170
         run: |
-          bash tools/ios_framework_prepare.sh arm64
+          set -o pipefail
+          bash tools/ios_framework_prepare.sh arm64 > ../node24-build.log 2>&1
+
+      - name: Show build log tail on failure
+        if: failure()
+        run: |
+          if [ -f node24-build.log ]; then
+            echo "===== node24-build.log tail ====="
+            tail -n 400 node24-build.log
+          else
+            echo "node24-build.log was not created"
+          fi
+
+      - name: Upload build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NodeMobile-24.5.0-ios-arm64-build-log
+          path: node24-build.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Verify iPhoneOS framework
         working-directory: nodejs-mobile
