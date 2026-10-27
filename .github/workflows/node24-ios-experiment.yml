@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: node24-ios-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-node24-ios-arm64:
     name: Build NodeMobile 24.5.0 for iPhoneOS arm64
@@ -64,47 +68,40 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Install ccache
-        run: |
-          brew install ccache
-          ccache --version
-
-      - name: Restore Node 24 compilation cache
+      - name: Restore completed NodeMobile framework cache
+        id: framework-cache
         uses: actions/cache/restore@v4
         with:
-          path: ~/.cache/ccache-node24-ios
-          key: node24-ios-arm64-macos15-4608d3c6-${{ runner.arch }}-${{ hashFiles('.github/workflows/node24-ios-experiment.yml') }}
-          restore-keys: |
-            node24-ios-arm64-macos15-4608d3c6-${{ runner.arch }}-
+          path: nodejs-mobile/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework
+          key: node24-framework-ios-arm64-macos15-xcode16.4-4608d3c6-v1
+
+      - name: Show disk space before build
+        if: steps.framework-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "===== disk before Node/V8 build ====="
+          df -h "$GITHUB_WORKSPACE"
 
       - name: Build NodeMobile framework
+        if: steps.framework-cache.outputs.cache-hit != 'true'
         working-directory: nodejs-mobile
         run: |
           set -o pipefail
-          export CCACHE_DIR="$HOME/.cache/ccache-node24-ios"
-          export CCACHE_MAXSIZE=3G
-          export CCACHE_COMPRESS=true
-          export CCACHE_BASEDIR="$GITHUB_WORKSPACE/nodejs-mobile"
-          export CC="ccache clang"
-          export CXX="ccache clang++"
-          ccache -z
-          bash tools/ios_framework_prepare.sh arm64 > ../node24-build.log 2>&1
-          ccache -s
+          bash tools/ios_framework_prepare.sh arm64 2>&1 | tee ../node24-build.log
 
-      - name: Save Node 24 compilation cache
-        if: always()
+      - name: Save completed NodeMobile framework cache
+        if: success() && steps.framework-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ~/.cache/ccache-node24-ios
-          key: node24-ios-arm64-macos15-4608d3c6-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: nodejs-mobile/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework
+          key: node24-framework-ios-arm64-macos15-xcode16.4-4608d3c6-v1
 
-      - name: Show ccache statistics
-        if: always()
-        run: ccache -s || true
-
-      - name: Show build log tail on failure
+      - name: Show build diagnostics on failure
         if: failure()
         run: |
+          echo "===== disk after failure ====="
+          df -h "$GITHUB_WORKSPACE" || true
+          echo "===== build tree sizes ====="
+          du -sh nodejs-mobile/out* 2>/dev/null || true
           if [ -f node24-build.log ]; then
             echo "===== node24-build.log tail ====="
             tail -n 400 node24-build.log
