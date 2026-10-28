@@ -1,9 +1,9 @@
-name: Node 24 iOS isolated experiment
+name: Node 24 iOS Runtime package test
 
 on:
   push:
     branches:
-      - experiment/node24-ios-20261027
+      - experiment/node24-runtime-package
     paths:
       - ".github/workflows/node24-ios-experiment.yml"
       - "experiments/node24/**"
@@ -13,12 +13,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: node24-ios-${{ github.ref }}
+  group: node24-runtime-package-\${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-node24-ios-arm64:
-    name: Build NodeMobile 24.5.0 for iPhoneOS arm64
+    name: Build complete NodeRuntime 24.5.0 for iPhoneOS arm64
     runs-on: macos-15
 
     steps:
@@ -33,7 +33,7 @@ jobs:
           path: nodejs-mobile
           fetch-depth: 1
 
-      - name: Show toolchain
+      - name: Show toolchain and initial disk
         run: |
           uname -a
           uname -m
@@ -41,48 +41,30 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
           python3 --version
           clang --version | head -n 1
+          df -h "$GITHUB_WORKSPACE"
 
-      - name: Verify source identity
+      - name: Verify source identity and package-manager versions
         working-directory: nodejs-mobile
         run: |
-          grep -E '^#define NODE_(MAJOR|MINOR|PATCH)_VERSION' src/node_version.h
+          set -e
           python3 - <<'PY'
-          import re
-          text=open("src/node_version.h",encoding="utf-8").read()
+          import json, re
+          from pathlib import Path
+          text=Path("src/node_version.h").read_text()
           vals={k:int(v) for k,v in re.findall(r"#define NODE_(MAJOR|MINOR|PATCH)_VERSION\s+(\d+)",text)}
           version=f"{vals['MAJOR']}.{vals['MINOR']}.{vals['PATCH']}"
-          print("node source version:",version)
-          if version!="24.5.0":
-              raise SystemExit(f"unexpected Node version {version}")
+          npm=json.loads(Path("deps/npm/package.json").read_text())["version"]
+          corepack=json.loads(Path("deps/corepack/package.json").read_text())["version"]
+          print(f"Node={version} npm={npm} Corepack={corepack}")
+          if (version,npm,corepack)!=("24.5.0","11.5.1","0.34.0"):
+              raise SystemExit("unexpected source/package-manager versions")
           PY
 
-      - name: Bound build parallelism
-        working-directory: nodejs-mobile
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path("tools/ios_framework_prepare.sh")
-          s=p.read_text()
-          s=s.replace('make -j$(getconf _NPROCESSORS_ONLN)','make -j4')
-          s=s.replace('arch -x86_64 make -j$(getconf _NPROCESSORS_ONLN)','arch -x86_64 make -j4')
-          p.write_text(s)
-          PY
-
-      - name: Restore completed NodeMobile framework cache
-        id: framework-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: nodejs-mobile/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework
-          key: node24-framework-ios-arm64-macos15-xcode16.4-4608d3c6-v1
-
-      - name: Reclaim macOS runner disk for Node/V8 build
-        if: steps.framework-cache.outputs.cache-hit != 'true'
+      - name: Reclaim macOS runner disk for full Node/V8 build
         run: |
           set -e
           KEEP_XCODE="$(xcode-select -p | sed 's#/Contents/Developer##')"
           echo "Keeping Xcode: $KEEP_XCODE"
-          echo "===== disk before cleanup ====="
-          df -h "$GITHUB_WORKSPACE"
           echo "===== installed Xcode bundles ====="
           du -sh /Applications/Xcode*.app 2>/dev/null || true
           for app in /Applications/Xcode*.app; do
@@ -98,48 +80,13 @@ jobs:
           echo "===== disk after cleanup ====="
           df -h "$GITHUB_WORKSPACE"
 
-      - name: Show disk space before build
-        if: steps.framework-cache.outputs.cache-hit != 'true'
-        run: |
-          echo "===== disk before Node/V8 build ====="
-          df -h "$GITHUB_WORKSPACE"
-
-      - name: Build NodeMobile framework
-        if: steps.framework-cache.outputs.cache-hit != 'true'
+      - name: Build NodeMobile framework and retain matching devkit build outputs
         working-directory: nodejs-mobile
+        env:
+          NODE_RUNTIME_JOBS: "4"
         run: |
           set -o pipefail
           bash tools/ios_framework_prepare.sh arm64 2>&1 | tee ../node24-build.log
-
-      - name: Save completed NodeMobile framework cache
-        if: success() && steps.framework-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: nodejs-mobile/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework
-          key: node24-framework-ios-arm64-macos15-xcode16.4-4608d3c6-v1
-
-      - name: Show build diagnostics on failure
-        if: failure()
-        run: |
-          echo "===== disk after failure ====="
-          df -h "$GITHUB_WORKSPACE" || true
-          echo "===== build tree sizes ====="
-          du -sh nodejs-mobile/out* 2>/dev/null || true
-          if [ -f node24-build.log ]; then
-            echo "===== node24-build.log tail ====="
-            tail -n 400 node24-build.log
-          else
-            echo "node24-build.log was not created"
-          fi
-
-      - name: Upload build diagnostics on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: NodeMobile-24.5.0-ios-arm64-build-log
-          path: node24-build.log
-          if-no-files-found: ignore
-          retention-days: 14
 
       - name: Verify iPhoneOS framework
         working-directory: nodejs-mobile
@@ -151,33 +98,112 @@ jobs:
           lipo -info "$FRAMEWORK/NodeMobile"
           xcrun dwarfdump --uuid "$FRAMEWORK/NodeMobile" || true
           test -f src/node.h
-          mkdir -p ../node24-artifact
-          cp -R "$FRAMEWORK" ../node24-artifact/
-          cp src/node_version.h ../node24-artifact/
-          cp src/node.h ../node24-artifact/
-          cp src/node_api.h ../node24-artifact/
-          python3 - <<'PY'
-          import json, subprocess, pathlib, platform
-          root=pathlib.Path("../node24-artifact")
-          info={
-            "node_version":"24.5.0",
-            "source_repo":"ybaelli/nodejs-mobile",
-            "source_commit":"4608d3c670cf37b383dbe631de4992cf23da46e0",
-            "source_pr":"nodejs-mobile/nodejs-mobile#158",
-            "target":"iphoneos-arm64",
-            "runner_arch":platform.machine(),
-            "framework_file":subprocess.check_output(["file",str(root/"NodeMobile.framework/NodeMobile")],text=True).strip(),
-          }
-          (root/"experiment-build-info.json").write_text(json.dumps(info,indent=2)+"\n")
-          print(json.dumps(info,indent=2))
-          PY
-          tar -czf NodeMobile-24.5.0-ios-arm64.tar.gz -C ../node24-artifact .
-          shasum -a 256 NodeMobile-24.5.0-ios-arm64.tar.gz
+          df -h "$GITHUB_WORKSPACE"
 
-      - name: Upload isolated experiment artifact
+      - name: Assemble complete CodexApp NodeRuntime
+        env:
+          NODE_RUNTIME_JOBS: "4"
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/experiments/node24/runtime-build"
+          mkdir -p "$ROOT/.cache"
+          ln -s "$GITHUB_WORKSPACE/nodejs-mobile" "$ROOT/.cache/nodejs-mobile-4608d3c670cf"
+          python3 "$ROOT/scripts/build-node-runtime.py" --reuse-framework --jobs 4 2>&1 | tee "$GITHUB_WORKSPACE/node24-runtime-package.log"
+          python3 "$ROOT/scripts/pack-node-runtime.py" 2>&1 | tee -a "$GITHUB_WORKSPACE/node24-runtime-package.log"
+          file "$ROOT/NodeRuntime/bin/node"
+          lipo -info "$ROOT/NodeRuntime/bin/node"
+          file "$ROOT/NodeRuntime/Frameworks/NodeMobile.framework/NodeMobile"
+          lipo -info "$ROOT/NodeRuntime/Frameworks/NodeMobile.framework/NodeMobile"
+          python3 - <<'PY'
+          import hashlib, json, tarfile
+          from pathlib import Path
+          root=Path("experiments/node24/runtime-build")
+          archive=root/"NodeRuntime.tar.gz"
+          bundle=json.loads((root/"NodeRuntime.bundle.json").read_text())
+          digest=hashlib.sha256(archive.read_bytes()).hexdigest()
+          assert bundle["node_version"]=="24.5.0", bundle.get("node_version")
+          assert bundle["npm_version"]=="11.5.1", bundle.get("npm_version")
+          assert bundle["corepack_version"]=="0.34.0", bundle.get("corepack_version")
+          assert bundle["archive_sha256"]==digest, (bundle["archive_sha256"],digest)
+          with tarfile.open(archive,"r:gz") as tf:
+              names=set(tf.getnames())
+          required={
+            "bin/node","bin/npm","bin/npx","bin/corepack",
+            "lib/node_modules/npm/bin/npm-cli.js",
+            "lib/node_modules/corepack/dist/corepack.js",
+            "lib/codex/ios-bootstrap.js",
+            "devkit/node/include/node/node.h",
+            "devkit/node/include/node/config.gypi",
+            "Frameworks/NodeMobile.framework/NodeMobile",
+            "manifest.json",
+          }
+          missing=sorted(required-names)
+          if missing:
+              raise SystemExit("archive missing required paths: "+", ".join(missing))
+          print(json.dumps({
+            "archive":str(archive),
+            "archive_bytes":archive.stat().st_size,
+            "sha256":digest,
+            "revision":bundle["revision"],
+            "node":bundle["node_version"],
+            "npm":bundle["npm_version"],
+            "corepack":bundle["corepack_version"],
+            "files":bundle["file_count"],
+            "tar_bytes":bundle["tar_bytes"],
+            "payload_bytes":bundle["payload_bytes"],
+          },indent=2))
+          PY
+          mkdir -p "$GITHUB_WORKSPACE/test-runtime"
+          cp "$ROOT/NodeRuntime.tar.gz" "$GITHUB_WORKSPACE/test-runtime/NodeRuntime.tar.gz"
+          cp "$ROOT/NodeRuntime.bundle.json" "$GITHUB_WORKSPACE/test-runtime/NodeRuntime.bundle.json"
+          cp "$ROOT/NodeRuntime/manifest.json" "$GITHUB_WORKSPACE/test-runtime/NodeRuntime.manifest.json"
+          cp "$ROOT/NodeRuntime/.build-info.json" "$GITHUB_WORKSPACE/test-runtime/NodeRuntime.build-info.json"
+          cat > "$GITHUB_WORKSPACE/test-runtime/README.txt" <<'EOF'
+          CodexApp NodeRuntime 24.5.0 iOS arm64 — TEST CANDIDATE ONLY
+          
+          This is a complete portable-v1 Node Runtime package built from the isolated
+          ybaelli/nodejs-mobile source commit 4608d3c670cf37b383dbe631de4992cf23da46e0.
+          It is not published in the production Runtime catalog and does not replace
+          the existing Node 18.20.4 JITless Runtime.
+          
+          Includes NodeMobile.framework, an arm64 launcher, npm 11.5.1, Corepack 0.34.0,
+          CodexApp iOS JS compatibility shims, and matching Node/V8/libuv/OpenSSL devkit
+          headers/configuration. The iOS build remains JITless; this package does not
+          claim to enable WebAssembly.
+          
+          Do not overwrite the production Runtime manifest. Validate on a test device
+          and keep the existing Node 18 Runtime available for rollback.
+          EOF
+          (cd "$GITHUB_WORKSPACE/test-runtime" && shasum -a 256 NodeRuntime.tar.gz NodeRuntime.bundle.json NodeRuntime.manifest.json NodeRuntime.build-info.json > SHA256SUMS)
+          cat "$GITHUB_WORKSPACE/test-runtime/SHA256SUMS"
+
+      - name: Upload complete NodeRuntime test package
         uses: actions/upload-artifact@v4
         with:
-          name: NodeMobile-24.5.0-ios-arm64
-          path: nodejs-mobile/NodeMobile-24.5.0-ios-arm64.tar.gz
+          name: NodeRuntime-24.5.0-ios-arm64-test
+          path: test-runtime/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NodeRuntime-24.5.0-build-logs
+          path: |
+            node24-build.log
+            node24-runtime-package.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Show disk and build diagnostics on failure
+        if: failure()
+        run: |
+          df -h "$GITHUB_WORKSPACE" || true
+          du -sh nodejs-mobile/out* 2>/dev/null || true
+          if [ -f node24-build.log ]; then
+            tail -n 250 node24-build.log
+          fi
+          if [ -f node24-runtime-package.log ]; then
+            tail -n 250 node24-runtime-package.log
+          fi
