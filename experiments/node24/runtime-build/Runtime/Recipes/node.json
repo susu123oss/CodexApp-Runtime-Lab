@@ -1,0 +1,72 @@
+{
+  "id": "node",
+  "display_name": "Node.js",
+  "group": "tools",
+  "handler": "portable-v1",
+  "order": 15,
+  "optional": true,
+  "summary": "Experimental Node.js 24.5.0 iOS arm64 Runtime candidate; test only, not official catalog.",
+  "ui": {
+    "symbol": "shippingbox.circle.fill",
+    "tint": "green"
+  },
+  "provides": [
+    "node.javascript",
+    "node.packages",
+    "node.fetch",
+    "node.process",
+    "node.native-addon"
+  ],
+  "requires": [],
+  "recommends": [
+    {
+      "id": "theos",
+      "provides": "ios.toolchain",
+      "reason": "Theos enables node-gyp/N-API native addon compilation and signing."
+    }
+  ],
+  "conflicts": [],
+  "capabilities": {
+    "node.javascript": {
+      "title": "Node.js JavaScript",
+      "summary": "Node.js 24 JavaScript runtime (experimental candidate)."
+    },
+    "node.packages": {
+      "title": "npm / Corepack",
+      "summary": "npm, npx, Corepack, pnpm and Yarn package workflows."
+    },
+    "node.fetch": {
+      "title": "Node fetch",
+      "summary": "iOS-compatible global fetch path."
+    },
+    "node.process": {
+      "title": "child_process",
+      "summary": "CodexApp-adapted child process execution."
+    },
+    "node.native-addon": {
+      "title": "node-gyp / N-API",
+      "summary": "Compile, sign and load iOS arm64 native Node addons.",
+      "requires": [
+        {
+          "id": "theos",
+          "provides": "ios.toolchain",
+          "reason": "Native addon compilation needs the iOS SDK, clang/linker and signing toolchain."
+        }
+      ]
+    }
+  },
+  "source": {
+    "nodejs_mobile": {
+      "repository": "https://github.com/ybaelli/nodejs-mobile.git",
+      "commit": "4608d3c670cf37b383dbe631de4992cf23da46e0",
+      "node_version": "24.5.0",
+      "npm_version": "11.5.1",
+      "corepack_version": "0.34.0"
+    }
+  },
+  "build": {
+    "builder": "scripts/build-node-runtime.py",
+    "packager": "scripts/pack-node-runtime.py",
+    "publisher": "scripts/publish-runtime-release.py --runtime node"
+  }
+}
