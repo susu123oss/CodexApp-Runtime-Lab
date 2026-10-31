@@ -3,8 +3,8 @@
   "failure_count": 0,
   "heartbeat_at": "2026-10-22T00:00:00Z",
   "last_attempt_at": "2026-10-30T05:50:59Z",
-  "last_result": "pending",
-  "retry_after": "2026-10-31T05:50:59Z",
+  "last_result": "success",
+  "retry_after": null,
   "schema": 1,
-  "status": "attempting"
+  "status": "published"
 }
