@@ -18,17 +18,21 @@ index 2940235c..c6ab42c0 100644
  const NETWORK_ACCESS_DENIED_MESSAGE: &str =
      "Network access was denied by the Codex sandbox network proxy.";
  const LATE_NETWORK_DENIAL_GRACE_PERIOD: Duration = Duration::from_millis(100);
-@@ -524,6 +533,9 @@ impl UnifiedExecProcessManager {
+@@ -537,10 +546,13 @@ impl UnifiedExecProcessManager {
+     pub(super) async fn exec_command_inner(
+         &self,
+         request: ExecCommandRequest,
          context: &UnifiedExecContext,
          mut completion: Option<&mut Completion<'_>>,
      ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
 +        #[cfg(target_os = "ios")]
 +        self.reclaim_exited_processes_before_spawn().await;
 +
-         let cwd = request.cwd.clone();
-         let process = self
-             .open_session_with_sandbox(&request, cwd.clone(), context)
-@@ -1719,6 +1731,68 @@ impl UnifiedExecProcessManager {
+         let prepared = &request.prepared;
+         let command = &prepared.resolved.command;
+         let cwd = prepared.cwd.clone();
+         let process = self.open_session_with_sandbox(&request, context).await;
+@@ -1726,6 +1738,68 @@ impl UnifiedExecProcessManager {
          }
      }
  
@@ -101,7 +105,7 @@ diff --git a/codex-rs/core/src/unified_exec/process_manager_tests.rs b/codex-rs/
 index ce56681e..3d1992a1 100644
 --- a/codex-rs/core/src/unified_exec/process_manager_tests.rs
 +++ b/codex-rs/core/src/unified_exec/process_manager_tests.rs
-@@ -601,6 +601,88 @@ fn pruning_protects_recent_processes_even_if_exited() {
+@@ -593,6 +593,88 @@ fn pruning_protects_recent_processes_even_if_exited() {
      assert_eq!(candidate, Some(1));
  }
  

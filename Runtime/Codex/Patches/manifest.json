@@ -183,7 +183,7 @@
     {
       "order": 11,
       "file": "0011-ios-unified-exec-fd-pressure.patch",
-      "sha256": "26db744a3726477111c2043fa25ef7414985735b6d2b5272dea7dfe2bae5c49a",
+      "sha256": "ea0ce63281e163c162eec06aaef913beca610ea408c0a4a0e4b17a76cace9c9f",
       "title": "Reclaim exited unified exec sessions before iOS spawn",
       "purpose": "Prevent iOS EMFILE failures by releasing file descriptors held by older exited Unified Exec sessions before creating the next process, while retaining recent completed sessions for final-output polling.",
       "source_files": [
