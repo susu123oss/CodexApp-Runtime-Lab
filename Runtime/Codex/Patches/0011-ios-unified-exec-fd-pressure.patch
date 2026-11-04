@@ -1,0 +1,192 @@
+diff --git a/codex-rs/core/src/unified_exec/process_manager.rs b/codex-rs/core/src/unified_exec/process_manager.rs
+index 2940235c..c6ab42c0 100644
+--- a/codex-rs/core/src/unified_exec/process_manager.rs
++++ b/codex-rs/core/src/unified_exec/process_manager.rs
+@@ -102,6 +102,15 @@ const UNIFIED_EXEC_ENV: [(&str, &str); 10] = [
+     ("GH_PAGER", "cat"),
+     ("CODEX_CI", "1"),
+ ];
++
++// iOS has a much tighter per-process file-descriptor budget than desktop hosts.
++// Unified Exec intentionally retains exited sessions so a later write_stdin can
++// collect their final output, but every retained local session can also keep
++// stdin/pipe/PTY descriptors alive. Keep a small recent tail and reclaim older
++// exited sessions *before* spawning the next command so EMFILE cannot prevent
++// the normal post-spawn pruning path from running.
++#[cfg(target_os = "ios")]
++const IOS_MAX_RETAINED_EXITED_UNIFIED_EXEC_PROCESSES: usize = 8;
+ const NETWORK_ACCESS_DENIED_MESSAGE: &str =
+     "Network access was denied by the Codex sandbox network proxy.";
+ const LATE_NETWORK_DENIAL_GRACE_PERIOD: Duration = Duration::from_millis(100);
+@@ -524,6 +533,9 @@ impl UnifiedExecProcessManager {
+         context: &UnifiedExecContext,
+         mut completion: Option<&mut Completion<'_>>,
+     ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
++        #[cfg(target_os = "ios")]
++        self.reclaim_exited_processes_before_spawn().await;
++
+         let cwd = request.cwd.clone();
+         let process = self
+             .open_session_with_sandbox(&request, cwd.clone(), context)
+@@ -1719,6 +1731,68 @@ impl UnifiedExecProcessManager {
+         }
+     }
+ 
++    #[cfg(target_os = "ios")]
++    async fn reclaim_exited_processes_before_spawn(&self) {
++        let removed = {
++            let mut store = self.process_store.lock().await;
++            Self::prune_exited_processes_for_fd_pressure(
++                &mut store,
++                IOS_MAX_RETAINED_EXITED_UNIFIED_EXEC_PROCESSES,
++            )
++        };
++
++        for entry in removed {
++            unregister_network_approval_for_entry(&entry).await;
++            entry.process.terminate();
++        }
++    }
++
++    #[cfg(any(target_os = "ios", test))]
++    fn prune_exited_processes_for_fd_pressure(
++        store: &mut ProcessStore,
++        max_retained_exited: usize,
++    ) -> Vec<ProcessEntry> {
++        let mut exited: Vec<(i32, Instant)> = store
++            .processes
++            .iter()
++            .filter_map(|(process_id, entry)| {
++                entry
++                    .process
++                    .has_exited()
++                    .then_some((*process_id, entry.last_used))
++            })
++            .collect();
++        if exited.len() <= max_retained_exited {
++            return Vec::new();
++        }
++
++        exited.sort_by_key(|(_, last_used)| *last_used);
++        let remove_target = exited.len() - max_retained_exited;
++        let mut removed = Vec::with_capacity(remove_target);
++        for (process_id, _) in exited {
++            if removed.len() >= remove_target {
++                break;
++            }
++            let Some(process) = store
++                .processes
++                .get(&process_id)
++                .map(|entry| Arc::clone(&entry.process))
++            else {
++                continue;
++            };
++
++            // A final write_stdin or terminal-event publication may still own
++            // the interaction lock briefly after process exit. Never race it;
++            // a later exec_command preflight will retry reclamation.
++            if let Ok(_interaction_guard) = process.interaction_lock().try_lock_owned()
++                && let Some(entry) = store.remove(process_id)
++            {
++                removed.push(entry);
++            }
++        }
++        removed
++    }
++
+     fn prune_processes_if_needed(store: &mut ProcessStore) -> Option<ProcessEntry> {
+         if store.processes.len() < MAX_UNIFIED_EXEC_PROCESSES {
+             return None;
+diff --git a/codex-rs/core/src/unified_exec/process_manager_tests.rs b/codex-rs/core/src/unified_exec/process_manager_tests.rs
+index ce56681e..3d1992a1 100644
+--- a/codex-rs/core/src/unified_exec/process_manager_tests.rs
++++ b/codex-rs/core/src/unified_exec/process_manager_tests.rs
+@@ -601,6 +601,88 @@ fn pruning_protects_recent_processes_even_if_exited() {
+     assert_eq!(candidate, Some(1));
+ }
+ 
++#[cfg(unix)]
++#[tokio::test]
++async fn fd_pressure_pruning_keeps_recent_exited_and_all_live_processes() {
++    let (_, turn) = crate::session::tests::make_session_and_context().await;
++    let exited_process = Arc::new(
++        crate::unified_exec::process_tests::remote_process(
++            codex_exec_server::WriteStatus::Accepted,
++            /*terminate_error*/ None,
++            codex_sandboxing::SandboxType::None,
++        )
++        .await,
++    );
++    exited_process
++        .terminate_confirmed()
++        .await
++        .expect("exited process should terminate");
++    let live_process = Arc::new(
++        crate::unified_exec::process_tests::remote_process(
++            codex_exec_server::WriteStatus::Accepted,
++            /*terminate_error*/ None,
++            codex_sandboxing::SandboxType::None,
++        )
++        .await,
++    );
++    let cwd = PathUri::parse("file:///tmp").expect("test cwd should be valid");
++    let now = Instant::now();
++    let mut store = ProcessStore::default();
++
++    for process_id in 1..=12 {
++        let is_exited = process_id <= 10;
++        store.processes.insert(
++            process_id,
++            ProcessEntry {
++                process: if is_exited {
++                    Arc::clone(&exited_process)
++                } else {
++                    Arc::clone(&live_process)
++                },
++                plugin_metrics_sidecar: None,
++                call_id: format!("call-{process_id}"),
++                process_id,
++                cwd: cwd.clone(),
++                initial_exec_command_active: Arc::new(AtomicBool::new(false)),
++                hook_command: format!("command-{process_id}"),
++                tty: false,
++                environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
++                permissions: super::super::TerminalPermissions::for_launch(
++                    turn.initial_environments
++                        .primary()
++                        .expect("turn environment"),
++                    &turn,
++                    super::super::TerminalSandboxSource::Native,
++                    crate::sandboxing::SandboxPermissions::UseDefault,
++                    /*additional_permissions*/ None,
++                    /*internal_permissions*/ None,
++                ),
++                network_approval: None,
++                session: std::sync::Weak::new(),
++                last_used: now - Duration::from_secs((13 - process_id) as u64),
++            },
++        );
++    }
++
++    let removed = UnifiedExecProcessManager::prune_exited_processes_for_fd_pressure(
++        &mut store,
++        /*max_retained_exited*/ 3,
++    );
++    let mut removed_ids = removed
++        .iter()
++        .map(|entry| entry.process_id)
++        .collect::<Vec<_>>();
++    removed_ids.sort_unstable();
++
++    assert_eq!(removed_ids, vec![1, 2, 3, 4, 5, 6, 7]);
++    assert_eq!(store.processes.len(), 5);
++    assert!(store.processes.contains_key(&8));
++    assert!(store.processes.contains_key(&9));
++    assert!(store.processes.contains_key(&10));
++    assert!(store.processes.contains_key(&11));
++    assert!(store.processes.contains_key(&12));
++}
++
+ #[cfg(unix)]
+ #[tokio::test]
+ async fn pruning_does_not_evict_live_process_while_exited_process_is_finalizing() {

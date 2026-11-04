@@ -179,6 +179,26 @@
       "environments": ["ios", "ios18", "roothide", "deb", "forkless", "unified_exec", "tty"],
       "depends_on": [5, 6, 8],
       "notes": "Fallback is limited to CodexApp forkless RootHide/DEB and PTY permission-denied errors; other PTY failures remain errors. Pipe fallback keeps stdin writable and preserves inherited descriptors."
+    },
+    {
+      "order": 11,
+      "file": "0011-ios-unified-exec-fd-pressure.patch",
+      "sha256": "26db744a3726477111c2043fa25ef7414985735b6d2b5272dea7dfe2bae5c49a",
+      "title": "Reclaim exited unified exec sessions before iOS spawn",
+      "purpose": "Prevent iOS EMFILE failures by releasing file descriptors held by older exited Unified Exec sessions before creating the next process, while retaining recent completed sessions for final-output polling.",
+      "source_files": [
+        "codex-rs/core/src/unified_exec/process_manager.rs",
+        "codex-rs/core/src/unified_exec/process_manager_tests.rs"
+      ],
+      "symbols": [
+        "UnifiedExecProcessManager::exec_command_inner",
+        "reclaim_exited_processes_before_spawn",
+        "prune_exited_processes_for_fd_pressure",
+        "IOS_MAX_RETAINED_EXITED_UNIFIED_EXEC_PROCESSES"
+      ],
+      "environments": ["ios", "trollstore", "rootless", "roothide", "runtime", "unified_exec"],
+      "depends_on": [5, 6],
+      "notes": "iOS-only pre-spawn cleanup retains the eight most recent exited sessions, never evicts live sessions, and respects the per-process interaction lock. Non-iOS behavior and the upstream total process cap remain unchanged."
     }
   ],
   "related_non_cli_patches": [

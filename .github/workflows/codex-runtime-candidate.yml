@@ -242,7 +242,7 @@ jobs:
           "$PACKAGING_ROOT/scripts/release-notes.sh" "v${VERSION}" >/dev/null
           "$PACKAGING_ROOT/scripts/check-skill-policy.sh" --self-test --config "$PACKAGING_ROOT/packaging/etc/codex/config.toml"
           patch_count="$(find "$PACKAGING_ROOT/patches" -maxdepth 1 -type f -name '*.patch' | wc -l | tr -d '[:space:]')"
-          test "$patch_count" = "10"
+          test "$patch_count" = "11"
           python3 scripts/codex-patchset.py verify
 
       - name: Build Codex CLI and Code Mode Host for iOS
