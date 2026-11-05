@@ -249,6 +249,12 @@ jobs:
         env:
           MAKEFLAGS: ""
           CARGO_MAKEFLAGS: ""
+          # Cargo's libgit2 fetch hit transient SecureTransport disconnects
+          # while resolving rusty_v8's nested Chromium submodules. Prefer the
+          # system Git client and retry network fetches more generously.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          CARGO_NET_RETRY: "10"
+          CARGO_HTTP_TIMEOUT: "600"
         run: make -C "$PACKAGING_ROOT" --no-print-directory build
 
       - name: Package CodexApp Laboratory Runtime
