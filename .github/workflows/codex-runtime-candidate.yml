@@ -271,12 +271,13 @@ jobs:
             --packaging-root "$PACKAGING_ROOT" \
             --output-root "$CANDIDATE_ROOT/runtime"
 
-
       - name: Generate Chinese upstream CLI change log
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          python3 -m py_compile scripts/codex-upstream-notes.py scripts/publish-codex-lab.py scripts/codex-candidate-plan.py
+          python3 scripts/codex-upstream-notes.py --self-test
           python3 scripts/codex-upstream-notes.py \
             --tag "$UPSTREAM_TAG" \
             --sha "$UPSTREAM_SHA" \

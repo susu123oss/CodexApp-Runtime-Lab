@@ -121,14 +121,49 @@ def version_tuple(value: str) -> tuple[int, int, int]:
     return tuple(map(int, match.groups()))
 
 
+def previous_stable_tag_from_upstream(current_version: str) -> str:
+    # The tags endpoint is small (unlike the releases endpoint, whose payload
+    # includes every platform asset). Walk until the current tag is found and
+    # choose the highest stable version below it.
+    current_tag = f"rust-v{current_version}"
+    candidates = []
+    found_current = False
+    for page in range(1, 11):
+        tags = api_json(f"{API_BASE}/tags?per_page=100&page={page}")
+        if not isinstance(tags, list) or not tags:
+            break
+        for item in tags:
+            name = str((item or {}).get("name") or "")
+            match = TAG_RE.fullmatch(name)
+            if not match:
+                continue
+            version = ".".join(match.groups())
+            if name == current_tag:
+                found_current = True
+            if version_tuple(version) < version_tuple(current_version):
+                candidates.append((version_tuple(version), name))
+        if found_current:
+            break
+    if not candidates:
+        return ""
+    return max(candidates, key=lambda item: item[0])[1]
+
+
 def previous_upstream_tag(manifest_path: Path, patch_manifest_path: Path, current_version: str) -> str:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     current = ((manifest.get("runtimes") or {}).get("codex") or {}).get("version", "")
     match = VERSION_RE.fullmatch(str(current))
     if match:
         previous = match.group(1)
-        if version_tuple(previous) <= version_tuple(current_version):
+        if version_tuple(previous) < version_tuple(current_version):
             return f"rust-v{previous}"
+        if version_tuple(previous) == version_tuple(current_version):
+            # A new Lab revision can reuse the same upstream release. In that
+            # case compare against the preceding official stable tag rather
+            # than incorrectly reporting that this is the first changelog.
+            previous_tag = previous_stable_tag_from_upstream(current_version)
+            if previous_tag:
+                return previous_tag
 
     patch_manifest = json.loads(patch_manifest_path.read_text(encoding="utf-8"))
     baseline = str((patch_manifest.get("canonical_upstream") or {}).get("baseline_version") or "")
