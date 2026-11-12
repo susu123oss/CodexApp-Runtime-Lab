@@ -98,6 +98,8 @@ def patch_digest(manifest: dict) -> str:
         ROOT / "scripts/codex-candidate-plan.py",
         ROOT / "scripts/codex-patchset.py",
         ROOT / "scripts/publish-codex-runtime.py",
+        ROOT / "scripts/publish-codex-lab.py",
+        ROOT / "scripts/codex-upstream-notes.py",
         ROOT / ".github/workflows/codex-runtime-candidate.yml",
     ]
     for item in sorted(manifest["patches"], key=lambda entry: int(entry["order"])):

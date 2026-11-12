@@ -17,6 +17,7 @@ on:
       - "Runtime/Recipes/codex.json"
       - "ThirdParty/bash/codex-posix-spawn.patch"
       - "scripts/codex-candidate-plan.py"
+      - "scripts/codex-upstream-notes.py"
       - "scripts/codex-patchset.py"
       - "scripts/publish-codex-runtime.py"
       - "scripts/publish-codex-lab.py"
@@ -270,6 +271,19 @@ jobs:
             --packaging-root "$PACKAGING_ROOT" \
             --output-root "$CANDIDATE_ROOT/runtime"
 
+
+      - name: Generate Chinese upstream CLI change log
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/codex-upstream-notes.py \
+            --tag "$UPSTREAM_TAG" \
+            --sha "$UPSTREAM_SHA" \
+            --manifest Runtime/runtime-manifest.json \
+            --patch-manifest Runtime/Codex/Patches/manifest.json \
+            --output "$CANDIDATE_ROOT/upstream-changelog.zh-CN.md"
+
       - name: Build Laboratory notes
         run: |
           set -euo pipefail
@@ -277,16 +291,23 @@ jobs:
           deb="$output/wiki.qaq.codex_${RUNTIME_VERSION}_iphoneos-arm64.deb"
           test -s "$deb"
           test -s "$output/SHA256SUMS"
+          test -s "$CANDIDATE_ROOT/upstream-changelog.zh-CN.md"
           {
-            echo "# Codex Laboratory v${RUNTIME_VERSION}"
+            echo "# CodexApp 实验室版 v${RUNTIME_VERSION}"
             echo
-            echo "- OpenAI tag: \`$UPSTREAM_TAG\`"
-            echo "- OpenAI commit: \`$UPSTREAM_SHA\`"
-            echo "- candidate identity: \`$CANDIDATE_TAG\`"
-            echo "- patch digest: \`$PATCH_DIGEST\`"
-            echo "- iOS floor: \`${{ steps.pins.outputs.min_ios }}\`"
+            echo "## 实验室构建信息"
             echo
-            echo "Experimental channel only. Stable CodexApp-Runtime is not modified."
+            echo "- 上游官方标签：\`$UPSTREAM_TAG\`"
+            echo "- 上游提交：\`$UPSTREAM_SHA\`"
+            echo "- 实验室 Candidate：\`$CANDIDATE_TAG\`"
+            echo "- 补丁集摘要：\`$PATCH_DIGEST\`"
+            echo "- 最低 iOS 版本：\`${{ steps.pins.outputs.min_ios }}\`"
+            echo
+            cat "$CANDIDATE_ROOT/upstream-changelog.zh-CN.md"
+            echo
+            echo "## 通道说明"
+            echo
+            echo "本版本仅属于 CodexApp 实验室预发布通道，不会修改稳定版仓库，也不会自动向普通用户推送或安装。请在 App 中主动选择实验室通道并确认安装。"
           } >"$CANDIDATE_ROOT/release-notes.md"
 
       - name: Upload workflow artifact
@@ -310,7 +331,8 @@ jobs:
           python3 scripts/publish-codex-lab.py \
             --candidate-tag "$CANDIDATE_TAG" \
             --deb "$output/wiki.qaq.codex_${RUNTIME_VERSION}_iphoneos-arm64.deb" \
-            --sums "$output/SHA256SUMS"
+            --sums "$output/SHA256SUMS" \
+            --release-notes "$CANDIDATE_ROOT/release-notes.md"
 
       - name: Publication summary
         run: |
