@@ -35,6 +35,7 @@ TICK = chr(96)
 PROTECTED_RE = re.compile(
     re.escape(TICK) + r"[^" + re.escape(TICK) + r"]+" + re.escape(TICK) +
     r"|https?://[^\s)]+|(?<!\w)#[0-9]+|"
+    r"(?<![A-Za-z0-9])amazon-bedrock(?:-runtime)?(?![A-Za-z0-9])|"
     r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b"
 )
 
@@ -210,12 +211,29 @@ def commit_details(message: str) -> tuple[str, list[str]]:
     title = lines[0].strip() if lines else ""
     details = []
     paragraphs = []
+    bullet_parts = []
+    paragraph_parts = []
     active = True
+
+    def flush_bullet():
+        if bullet_parts:
+            details.append(" ".join(bullet_parts).strip())
+            bullet_parts.clear()
+
+    def flush_paragraph():
+        if paragraph_parts:
+            paragraphs.append(" ".join(paragraph_parts).strip())
+            paragraph_parts.clear()
+
     for raw in lines[1:]:
         line = raw.strip()
         if not line:
+            flush_bullet()
+            flush_paragraph()
             continue
         if line.startswith("## "):
+            flush_bullet()
+            flush_paragraph()
             heading = line[3:].strip().lower()
             if heading in {"testing", "tests", "changelog", "review", "notes"}:
                 active = False
@@ -223,9 +241,17 @@ def commit_details(message: str) -> tuple[str, list[str]]:
         if not active or line.startswith(("GitOrigin-RevId:", "(cherry picked from commit")):
             continue
         if line.startswith("- "):
-            details.append(line[2:].strip())
+            flush_paragraph()
+            flush_bullet()
+            bullet_parts.append(line[2:].strip())
         elif not line.startswith(("Co-authored-by:", "Signed-off-by:")):
-            paragraphs.append(line)
+            if bullet_parts:
+                bullet_parts.append(line)
+            else:
+                paragraph_parts.append(line)
+
+    flush_bullet()
+    flush_paragraph()
     if details:
         return title, details[:4]
     return title, paragraphs[:2]
@@ -241,6 +267,13 @@ def self_test() -> None:
     assert classify_commit("Restrict legacy incremental tools") == "问题修复与稳定性"
     title, details = commit_details("Add support (#1)\n\n## What changed\n- Keep " + TICK + "web_search" + TICK + " in tools\n\n## Testing\n- tests")
     assert title == "Add support (#1)" and details == ["Keep " + TICK + "web_search" + TICK + " in tools"]
+    _, wrapped = commit_details(
+        "Restrict provider scope (#2)\n\n## What changed\n"
+        "Gate the feature on Amazon Bedrock and\n"
+        "Amazon Bedrock Runtime instead of OpenAI.\n"
+        "Responses Lite continues to use the existing flag."
+    )
+    assert len(wrapped) == 1 and "Responses Lite" in wrapped[0]
     print("[codex-upstream-notes] self-test: PASS")
 
 
