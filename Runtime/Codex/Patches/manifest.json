@@ -31,7 +31,7 @@
     {
       "order": 2,
       "file": "0002-ios-no-wayland-arboard.patch",
-      "sha256": "ae5df1eaf9a99d7762264a42a8cb4af9378f4d622e253d7052428ead8a465f8c",
+      "sha256": "1e7028663a798a71bb3706f26b57c7934d77b0194fa2a34fc0fc71f9b51f3c64",
       "title": "Keep Wayland clipboard backend Linux-only",
       "purpose": "Prevent arboard's Wayland data-control backend from being selected while cross-compiling Codex for iOS.",
       "source_files": [

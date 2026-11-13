@@ -15,8 +15,8 @@ diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
 index 47968b8..d916570 100644
 --- a/codex-rs/tui/Cargo.toml
 +++ b/codex-rs/tui/Cargo.toml
-@@ -145,8 +145,9 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"
- objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSDateFormatter", "NSFormatter", "NSLocale", "NSString"] }
+@@ -145,8 +145,9 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["std"
+ objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSData", "NSDateFormatter", "NSEnumerator", "NSFormatter", "NSLocale", "NSString"] }
  
  [target.'cfg(target_os = "linux")'.dependencies]
 -# Keep the same executor features as the credential store, which also uses zbus.
