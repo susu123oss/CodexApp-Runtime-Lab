@@ -271,19 +271,33 @@ jobs:
             --packaging-root "$PACKAGING_ROOT" \
             --output-root "$CANDIDATE_ROOT/runtime"
 
-      - name: Generate Chinese upstream CLI change log
+      - name: Generate optional upstream CLI change log
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          python3 -m py_compile scripts/codex-upstream-notes.py scripts/publish-codex-lab.py scripts/codex-candidate-plan.py
-          python3 scripts/codex-upstream-notes.py --self-test
-          python3 scripts/codex-upstream-notes.py \
+          set -uo pipefail
+          output="$CANDIDATE_ROOT/upstream-changelog.zh-CN.md"
+          if ! python3 -m py_compile scripts/codex-upstream-notes.py scripts/publish-codex-lab.py scripts/codex-candidate-plan.py; then
+            echo "::warning::Optional changelog syntax check failed; using English fallback."
+          fi
+          if ! python3 scripts/codex-upstream-notes.py --self-test; then
+            echo "::warning::Optional changelog self-test failed; using English fallback."
+          fi
+          if ! python3 scripts/codex-upstream-notes.py \
             --tag "$UPSTREAM_TAG" \
             --sha "$UPSTREAM_SHA" \
             --manifest Runtime/runtime-manifest.json \
             --patch-manifest Runtime/Codex/Patches/manifest.json \
-            --output "$CANDIDATE_ROOT/upstream-changelog.zh-CN.md"
+            --output "$output"; then
+            echo "::warning::Optional changelog generation failed; publishing with English fallback."
+            cat >"$output" <<EOF
+          ## Upstream Codex CLI changelog
+
+          - Upstream release: $UPSTREAM_TAG
+          - Upstream commit: $UPSTREAM_SHA
+          - The optional localized changelog was unavailable; the build and release remain valid.
+          EOF
+          fi
 
       - name: Build Laboratory notes
         run: |

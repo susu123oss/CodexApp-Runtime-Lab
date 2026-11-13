@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a Chinese, release-to-release OpenAI Codex CLI changelog for Lab releases."""
+"""Generate a release-to-release OpenAI Codex CLI changelog for Lab releases."""
 
 from __future__ import annotations
 
@@ -71,48 +71,8 @@ def api_json(url: str, timeout: int = 30, allow_404: bool = False):
 
 
 def translate_text(text: str, timeout: int = 30) -> str:
-    source = text.strip()
-    if not source:
-        return ""
-    protected = []
-
-    def replace_token(match):
-        marker = f"ZXQCODEXPROTECTED{len(protected)}TOKEN"
-        protected.append((marker, match.group(0)))
-        return marker
-
-    prepared = PROTECTED_RE.sub(replace_token, source)
-    query = urllib.parse.urlencode({
-        "client": "gtx",
-        "sl": "en",
-        "tl": "zh-CN",
-        "dt": "t",
-        "q": prepared,
-    })
-    request = urllib.request.Request(
-        "https://translate.googleapis.com/translate_a/single?" + query,
-        headers={"User-Agent": "Mozilla/5.0 CodexApp-Laboratory-Changelog"},
-    )
-    last_error = None
-    for attempt in range(4):
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                payload = json.load(response)
-            translated = "".join(
-                str(part[0]) for part in (payload[0] or [])
-                if isinstance(part, list) and part and part[0]
-            )
-            if not translated:
-                raise ValueError("translation service returned an empty result")
-            for marker, original in protected:
-                translated = translated.replace(marker, original)
-            return translated
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, IndexError, TypeError) as error:
-            last_error = error
-            if attempt == 3:
-                raise RuntimeError(f"Chinese translation failed; refusing to publish English-only notes: {error}") from error
-            time.sleep(min(2 ** attempt, 8))
-    raise RuntimeError(f"Chinese translation failed: {last_error}")
+    del timeout
+    return text.strip()
 
 
 def version_tuple(value: str) -> tuple[int, int, int]:
