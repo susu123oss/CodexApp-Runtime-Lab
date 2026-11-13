@@ -1,10 +1,10 @@
 {
-  "candidate_tag": "codex-candidate-v0.167.2-222027dda09b",
+  "candidate_tag": "codex-candidate-v0.168.0-58399bdd2123",
   "failure_count": 0,
   "heartbeat_at": "2026-10-22T00:00:00Z",
-  "last_attempt_at": "2026-11-12T07:12:42Z",
+  "last_attempt_at": "2026-11-13T06:48:15Z",
   "last_result": "pending",
-  "retry_after": "2026-11-13T07:12:42Z",
+  "retry_after": "2026-11-14T06:48:15Z",
   "schema": 1,
   "status": "attempting"
 }
