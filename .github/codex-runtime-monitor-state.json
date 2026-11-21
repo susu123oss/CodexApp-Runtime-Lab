@@ -1,7 +1,7 @@
 {
   "candidate_tag": "codex-candidate-v0.171.0-b221ee9c6545",
   "failure_count": 0,
-  "heartbeat_at": "2026-10-22T00:00:00Z",
+  "heartbeat_at": "2026-11-21T07:10:11Z",
   "last_attempt_at": "2026-11-20T07:18:09Z",
   "last_result": "pending",
   "retry_after": "2026-11-21T07:18:09Z",
