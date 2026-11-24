@@ -23,7 +23,7 @@ diff --git a/codex-rs/mxc-sandbox/Cargo.toml b/codex-rs/mxc-sandbox/Cargo.toml
  serde = { workspace = true, features = ["derive"] }
  serde_json = { workspace = true }
  thiserror = { workspace = true }
-@@ -27,2 +26,3 @@ thiserror = { workspace = true }
- [target.'cfg(windows)'.dependencies]
+@@ -41,2 +41,3 @@
 +mxc-sdk = { workspace = true }
- flatbuffers = { workspace = true }
+ [dev-dependencies]
+ pretty_assertions = { workspace = true }
