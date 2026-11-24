@@ -165,7 +165,7 @@
     {
       "order": 10,
       "file": "0010-ios-pty-eperm-pipe-fallback.patch",
-      "sha256": "1c73ac024e25222bb3c56b16931c22dcec3c8c4bfaa21f4388638ec5cceef834",
+      "sha256": "27f4927ee3b6d294a57c40605148825496548e297a231ab5e6daf57ee649113a",
       "title": "Fallback denied iOS RootHide PTY launches to pipes",
       "purpose": "Keep tty-requested unified exec usable when iOS 18 RootHide/DEB rejects openpty with EPERM, without globally disabling PTY support.",
       "source_files": [
@@ -178,7 +178,7 @@
       ],
       "environments": ["ios", "ios18", "roothide", "deb", "forkless", "unified_exec", "tty"],
       "depends_on": [5, 6, 8],
-      "notes": "Fallback is limited to CodexApp forkless RootHide/DEB and PTY permission-denied errors; other PTY failures remain errors. Pipe fallback keeps stdin writable and preserves inherited descriptors."
+      "notes": "Rebased for the upstream ChildFds/argv0 PTY API. Fallback is limited to CodexApp forkless RootHide/DEB and PTY permission-denied errors; other PTY failures remain errors. Pipe fallback keeps stdin writable and preserves inherited descriptors."
     },
     {
       "order": 11,

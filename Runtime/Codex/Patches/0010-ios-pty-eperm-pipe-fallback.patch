@@ -1,17 +1,7 @@
 diff --git a/codex-rs/utils/pty/src/pty.rs b/codex-rs/utils/pty/src/pty.rs
 --- a/codex-rs/utils/pty/src/pty.rs
 +++ b/codex-rs/utils/pty/src/pty.rs
-@@ -1,4 +1,6 @@
- use std::collections::HashMap;
-+#[cfg(target_os = "ios")]
-+use std::ffi::OsStr;
- #[cfg(unix)]
- use std::fs::File;
- use std::io::ErrorKind;
-@@ -133,6 +135,22 @@ fn platform_native_pty_system() -> Box<dyn portable_pty::PtySystem + Send> {
-     }
- }
- 
+@@ -64,3 +64,19 @@
 +#[cfg(target_os = "ios")]
 +fn should_fallback_pty_to_pipe(error: &anyhow::Error) -> bool {
 +    let roothide_deb_forkless =
@@ -28,15 +18,22 @@ diff --git a/codex-rs/utils/pty/src/pty.rs b/codex-rs/utils/pty/src/pty.rs
 +        && (message.contains("operation not permitted") || message.contains("permission denied"))
 +}
 +
- /// Spawn a process attached to a PTY, preserving selected inherited file
- /// descriptors across exec on Unix.
- pub async fn spawn_process(
-@@ -171,9 +189,35 @@ pub async fn spawn_process(
-     }
+ /// Returns true when ConPTY support is available (Windows only).
+ #[cfg(windows)]
+ pub fn conpty_supported() -> bool {
+@@ -170,2 +187,7 @@
++    #[cfg(target_os = "ios")]
++    let pipe_arg0 = arg0
++        .as_ref()
++        .filter(|arg0| OsStr::new(arg0.as_str()) != program)
++        .cloned();
      #[cfg(unix)]
-     if !inherited_fds.as_slice().is_empty() {
+     let arg0 = arg0.as_deref().filter(|arg0| OsStr::new(arg0) != program);
+@@ -186,6 +207,25 @@
+     if arg0.is_some() || !inherited_fds.as_slice().is_empty() {
+         // portable-pty resolves argv[0] as the executable. Only a native spawn
+         // can pass a dispatch name while executing the configured program.
 -        return spawn_process_preserving_fds(program, args, cwd, env, arg0, size, inherited_fds)
--            .await;
 +        let result =
 +            spawn_process_preserving_fds(program, args, cwd, env, arg0, size, inherited_fds).await;
 +        #[cfg(target_os = "ios")]
@@ -52,21 +49,29 @@ diff --git a/codex-rs/utils/pty/src/pty.rs b/codex-rs/utils/pty/src/pty.rs
 +                args,
 +                cwd,
 +                env,
-+                arg0,
++                &pipe_arg0,
 +                inherited_fds.as_slice(),
 +            )
-+            .await;
+             .await;
 +        }
 +        return result;
      }
- 
--    spawn_process_portable(program, args, cwd, env, arg0, size).await
-+    let result = spawn_process_portable(program, args, cwd, env, arg0, size).await;
+@@ -193,2 +233,17 @@
+-    spawn_process_portable(program, args, cwd, env, size).await
++    let result = spawn_process_portable(program, args, cwd, env, size).await;
 +    #[cfg(target_os = "ios")]
 +    if let Err(error) = &result
 +        && should_fallback_pty_to_pipe(error)
 +    {
-+        return crate::pipe::spawn_process(program, args, cwd, env, arg0, &[]).await;
++        return crate::pipe::spawn_process(
++            program,
++            args,
++            cwd,
++            env,
++            &pipe_arg0,
++            inherited_fds.as_slice(),
++        )
++        .await;
 +    }
 +    result
  }
